@@ -1,8 +1,4 @@
-import type { RunResponse, UndoRow } from "@/lib/schema";
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
+import type { CloseBatch, RunResponse } from "@/lib/schema";
 
 function hostOf(url: string): string {
   try {
@@ -12,42 +8,58 @@ function hostOf(url: string): string {
   }
 }
 
+function when(ms: number): string {
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+}
+
 export function UndoView({
-  rows,
+  batches,
   lastRun,
   busy,
   onRestore,
 }: {
-  rows: UndoRow[];
+  batches: CloseBatch[];
   lastRun: RunResponse | null;
   busy: boolean;
-  onRestore: () => void;
+  onRestore: (batchId: string) => void;
 }) {
   return (
     <div className="memory">
-      <section className="panel undo-dock">
-        <div className="undo-head">
-          <div>
-            <p className="kicker">Restore</p>
-            <h2>{rows.length === 0 ? "Nothing to reopen" : plural(rows.length, "tab")}</h2>
-          </div>
-          <button type="button" className="primary" disabled={busy || rows.length === 0} onClick={onRestore}>
-            Restore
-          </button>
-        </div>
-        {rows.length > 0 ? (
-          <ul className="site-list">
-            {rows.map((row) => (
-              <li key={`${row.window_id}-${row.tab_id}`}>
-                <span className="title">{row.title || hostOf(row.url)}</span>
-                <span className="host">{hostOf(row.url)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hint">Closed tabs land here.</p>
-        )}
-      </section>
+      {batches.length === 0 ? (
+        <section className="panel undo-dock">
+          <p className="kicker">Restore</p>
+          <h2>Nothing to reopen</h2>
+          <p className="hint">Closed tasks from the last month land here.</p>
+        </section>
+      ) : (
+        batches.map((batch) => (
+          <section key={batch.batch_id} className="panel undo-dock">
+            <div className="undo-head">
+              <div>
+                <p className="kicker">{when(batch.closed_at)}</p>
+                <h2>{batch.label}</h2>
+              </div>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => onRestore(batch.batch_id)}
+              >
+                Restore {batch.rows.length}
+              </button>
+            </div>
+            <ul className="site-list">
+              {batch.rows.slice(0, 6).map((row) => (
+                <li key={`${row.window_id}-${row.tab_id}-${row.url}`}>
+                  <span className="title">{row.title || hostOf(row.url)}</span>
+                  <span className="host">{hostOf(row.url)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      )}
 
       {lastRun?.artifacts.length ? (
         <section className="panel">

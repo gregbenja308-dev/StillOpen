@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from stillopen_core.gateway.router import AgentGateway, get_gateway
 from stillopen_core.google.workspace import FakeGoogle, GoogleWorkspace
 from stillopen_core.schemas.agent import ClerkOutput, TabApply
-from stillopen_core.schemas.artifact import ArtifactRecord
+from stillopen_core.schemas.artifact import ArtifactKind, ArtifactRecord
 from stillopen_core.schemas.plan import Plan, Verb
 from stillopen_core.schemas.tab import CloseHint, SanitizedTab
+
+_CREATE_TOOL = {
+    ArtifactKind.DOC: "create_doc",
+    ArtifactKind.EVENT: "create_event",
+    ArtifactKind.TASK: "create_task",
+    ArtifactKind.MAIL: "send_mail",
+}
 
 
 def execute(
@@ -14,10 +22,23 @@ def execute(
     drafts: ClerkOutput,
     tabs: list[SanitizedTab],
     google: GoogleWorkspace,
+    *,
+    gateway: AgentGateway | None = None,
 ) -> tuple[list[ArtifactRecord], TabApply]:
+    gw = gateway or get_gateway()
     records: list[ArtifactRecord] = []
     for draft in drafts.drafts:
-        record = google.create(draft.kind, draft.title, draft.body)
+        tool = _CREATE_TOOL.get(draft.kind)
+        if tool is None:
+            continue
+        record = gw.invoke_sync(
+            agent_name="runner",
+            tool_name=tool,
+            fn=google.create,
+            kind=draft.kind,
+            title=draft.title,
+            body=draft.body,
+        )
         record.draft_id = draft.draft_id
         if not record.title:
             record.title = draft.title
@@ -39,7 +60,9 @@ def execute(
                 close_ids.append(action.tab_id)
             else:
                 keep_ids.append(action.tab_id)
-    return records, TabApply(close_tab_ids=close_ids, keep_tab_ids=keep_ids)
+    apply = TabApply(close_tab_ids=close_ids, keep_tab_ids=keep_ids)
+    gw.invoke_sync(agent_name="runner", tool_name="emit_tab_apply", fn=lambda: apply)
+    return records, apply
 
 
 __all__ = ["FakeGoogle", "execute"]

@@ -8,6 +8,7 @@ def test_healthz() -> None:
     res = client.get("/healthz")
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+    assert res.json()["run_graph"] == "clerk>runner>verifier"
 
 
 def test_create_plan_from_fixture(seeded_tabs: list[TabSnapshot]) -> None:

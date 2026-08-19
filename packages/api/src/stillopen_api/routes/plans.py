@@ -23,7 +23,7 @@ class CreatePlanRequest(BaseModel):
 
     user_id: str = Field(min_length=1, max_length=128)
     command: str | None = Field(default=None, max_length=500)
-    tabs: list[TabSnapshot] = Field(min_length=1, max_length=80)
+    tabs: list[TabSnapshot] = Field(min_length=1, max_length=200)
     force_file: bool = False
 
 

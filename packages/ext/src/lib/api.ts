@@ -35,7 +35,19 @@ export async function userId(): Promise<string> {
 
 async function readJson(response: Response): Promise<unknown> {
   if (!response.ok) {
-    throw new Error(`API ${response.status}`);
+    let extra = "";
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      if (Array.isArray(body.detail) && body.detail[0]) {
+        const first = body.detail[0] as { loc?: unknown[]; msg?: string };
+        extra = `: ${first.msg ?? JSON.stringify(first)}`;
+      } else if (typeof body.detail === "string") {
+        extra = `: ${body.detail}`;
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`API ${response.status}${extra}`);
   }
   return response.json();
 }
@@ -154,7 +166,10 @@ export async function scheduleClose(input: {
   return scheduledCloseSchema.parse(body);
 }
 
-export async function inferTasks(tabs: TabSnapshot[], cutoffDays = 7): Promise<OpenTask[]> {
+export async function inferTasks(
+  tabs: TabSnapshot[],
+  opts: { cutoffDays?: number; existing?: OpenTask[]; ignoredUrls?: string[] } = {},
+): Promise<OpenTask[]> {
   if (tabs.length === 0) {
     return [];
   }
@@ -163,7 +178,13 @@ export async function inferTasks(tabs: TabSnapshot[], cutoffDays = 7): Promise<O
     await fetch(`${base}/v1/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: uid, tabs, cutoff_days: cutoffDays }),
+      body: JSON.stringify({
+        user_id: uid,
+        tabs,
+        cutoff_days: opts.cutoffDays ?? 7,
+        existing: opts.existing ?? [],
+        ignored_urls: opts.ignoredUrls ?? [],
+      }),
     }),
   );
   return inferTasksResponseSchema.parse(body).tasks;

@@ -2,7 +2,7 @@
 
 Record after a live Doc URL exists. Do not dump a personal window.
 
-1. **Friction (20s)** — Open demo tabs. Chrome groups them “Austin rentals.” Say: “Chrome named a cluster. That is not the job.”
+1. **Friction (20s)** — Demo opens a messy window: Austin listings, a dictionary lookup, laptops, UPS, news, Chase. Say: “Chrome did not finish this. These are unfinished tasks.”
 2. **Twist (15s)** — “Still Open names the task — find a place in Austin — and asks if you are done.”
 3. **Done, then close (90s)** — Hit **I’m done**. Durable job Files a Doc first. Show the **live Doc URL**. Tabs gone. Restore lists exact titles. Chase never moved.
 4. **Still going (20s)** — Restore, hit **Still going**. Memory shows a keep. Tabs stay.

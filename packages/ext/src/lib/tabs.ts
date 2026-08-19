@@ -1,5 +1,5 @@
 import { isCloseableUrl, redactUrl } from "./redact";
-import type { TabSnapshot, UndoRow } from "./schema";
+import type { CloseBatch, TabSnapshot, UndoRow } from "./schema";
 
 const closingByUs = new Set<number>();
 
@@ -58,7 +58,8 @@ async function snapshot(query: chrome.tabs.QueryInfo, mode: "replace" | "merge")
     active: Boolean(tab.active),
     group_id: tab.groupId ?? -1,
     group_title: groupTitles.get(tab.groupId ?? -1) ?? "",
-    last_accessed_ms: tab.lastAccessed && tab.lastAccessed > 0 ? tab.lastAccessed : null,
+    last_accessed_ms:
+      tab.lastAccessed && tab.lastAccessed > 0 ? Math.round(tab.lastAccessed) : null,
     extract: null,
   }));
 }
@@ -71,7 +72,10 @@ export function snapshotAllWindows(): Promise<TabSnapshot[]> {
   return snapshot({}, "replace");
 }
 
-export async function applyClose(tabIds: number[]): Promise<{ closed: number; rows: UndoRow[] }> {
+export async function applyClose(
+  tabIds: number[],
+  label = "Closed",
+): Promise<{ closed: number; rows: UndoRow[]; batch: CloseBatch | null }> {
   const stored = await chrome.storage.session.get({ undoMap: [] as UndoRow[] });
   const undoMap = (stored.undoMap ?? []) as UndoRow[];
   const byId = new Map(undoMap.map((row) => [row.tab_id, row]));
@@ -85,14 +89,69 @@ export async function applyClose(tabIds: number[]): Promise<{ closed: number; ro
   }
   const rows = undoMap.filter((row) => toClose.includes(row.tab_id));
   if (toClose.length === 0) {
-    return { closed: 0, rows: [] };
+    return { closed: 0, rows: [], batch: null };
   }
   for (const id of toClose) {
     closingByUs.add(id);
   }
   await chrome.tabs.remove(toClose);
+  const batch = await recordBatch(label, rows);
   await chrome.storage.session.set({ lastClosed: rows });
-  return { closed: toClose.length, rows };
+  return { closed: toClose.length, rows, batch };
+}
+
+const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function loadBatches(): Promise<CloseBatch[]> {
+  const stored = await chrome.storage.local.get({ closeBatches: [] as CloseBatch[] });
+  const cutoff = Date.now() - MONTH_MS;
+  return ((stored.closeBatches ?? []) as CloseBatch[]).filter((row) => row.closed_at >= cutoff);
+}
+
+async function recordBatch(label: string, rows: UndoRow[]): Promise<CloseBatch | null> {
+  if (rows.length === 0) {
+    return null;
+  }
+  const batch: CloseBatch = {
+    batch_id: crypto.randomUUID().replace(/-/g, "").slice(0, 26),
+    label: label.slice(0, 48) || "Closed",
+    closed_at: Date.now(),
+    rows,
+  };
+  const batches = [batch, ...(await loadBatches())];
+  await chrome.storage.local.set({ closeBatches: batches });
+  return batch;
+}
+
+export async function peekBatches(): Promise<CloseBatch[]> {
+  return loadBatches();
+}
+
+export async function restoreBatch(batchId: string): Promise<number> {
+  const batches = await loadBatches();
+  const batch = batches.find((row) => row.batch_id === batchId);
+  if (!batch) {
+    return 0;
+  }
+  const rows = [...batch.rows].sort((a, b) => a.index - b.index);
+  for (const row of rows) {
+    try {
+      await chrome.tabs.create({
+        url: row.url,
+        index: row.index,
+        pinned: row.pinned,
+        windowId: row.window_id,
+        active: false,
+      });
+    } catch {
+      await chrome.tabs.create({ url: row.url, active: false });
+    }
+  }
+  await chrome.storage.local.set({
+    closeBatches: batches.filter((row) => row.batch_id !== batchId),
+  });
+  await chrome.storage.session.set({ lastClosed: [] });
+  return rows.length;
 }
 
 export async function peekUndo(): Promise<UndoRow[]> {

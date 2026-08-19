@@ -75,12 +75,30 @@ _CLOSE_RE = re.compile(
     r"\b(?:always close|ok to close|okay to close|delete|close|kill|drop)\b",
     re.IGNORECASE,
 )
+_CLOSE_COMMAND = re.compile(
+    r"\b(?:delete|close unused|never close|ok to close|okay to close|"
+    r"always close|don['’]t close|do not close)\b",
+    re.IGNORECASE,
+)
+_QUESTION_RE = re.compile(
+    r"^\s*(what|what['’]?s|why|how|explain|help|tell me|can i|does|is this|who)\b",
+    re.IGNORECASE,
+)
+_PRODUCT = (
+    "Still Open names the unfinished jobs your leftover tabs belong to. "
+    "Expand a task to see its tabs, drag to move them, hit × to leave a tab "
+    "open but out of the task, and Done, close! when that job is finished."
+)
 
 
 def parse_preference(message: str) -> ChatIntent:
     text = message.strip()
     if not text:
-        return ChatIntent(reply="Say what to close or keep — for example, delete any news tabs.")
+        return ChatIntent(
+            reply="Ask how tasks work, or what to close — for example, delete any news tabs."
+        )
+    if _is_product_question(text) and not _CLOSE_COMMAND.search(text):
+        return ChatIntent(reply=_help_reply(text), parser="help")
 
     cutoff: int | None = None
     cut = _CUTOFF_RE.search(text)
@@ -146,9 +164,7 @@ def apply_chat(profile: HabitProfile, message: str, intent: ChatIntent) -> Habit
         )
     for host in intent.keep_hosts:
         before = profile.rule_for(host)
-        rule = upsert_rule(
-            profile, host, ClosePolicy.ALWAYS_KEEP, phrase=message, source="chat"
-        )
+        rule = upsert_rule(profile, host, ClosePolicy.ALWAYS_KEEP, phrase=message, source="chat")
         summary = f"Keep {rule.host_suffix}"
         summaries.append(summary)
         append_mutation(
@@ -217,8 +233,10 @@ def apply_chat(profile: HabitProfile, message: str, intent: ChatIntent) -> Habit
 
 
 def interpret_preference(message: str) -> ChatIntent:
-    heuristic = parse_preference(message)
     gemini = _try_gemini(message)
+    if gemini is not None and gemini.reply and not gemini.wants_close:
+        return gemini
+    heuristic = parse_preference(message)
     if gemini is None:
         return heuristic
     merged = ChatIntent(
@@ -253,13 +271,23 @@ def _try_gemini(message: str) -> ChatIntent | None:
     if not settings.has_gemini:
         return None
     prompt = (
-        "Extract tab-closing intent as JSON with keys "
-        "stale_cutoff_days (int or null), unused_days (int or null), "
-        "keep_hosts (string[]), close_hosts (string[]), "
+        "You are Still Open's in-app helper. Still Open groups leftover browser "
+        "tabs into named unfinished tasks (jobs, not website categories). "
+        "Users expand a task, drag tabs between tasks, hit × to leave a tab open "
+        "but out of the task, Demo Seed to open sample tabs, Rescan to regroup, "
+        "Restore to reopen closes from the last 30 days, and Done, close! to "
+        "finish a task (durable jobs File to Google first). Bank/health/gov tabs "
+        "are protected and never sent to a model. Unused/stale means the tab "
+        "hasn't been looked at in N days (default 7).\n"
+        "If they ask how the tool works or what a word means, answer in 1-3 "
+        "short sentences. Set wants_close false unless they clearly asked to "
+        "close or delete tabs now.\n"
+        "If they asked to close/keep tabs, extract that too. "
+        "Return JSON with keys: stale_cutoff_days (int or null), unused_days "
+        "(int or null), keep_hosts (string[]), close_hosts (string[]), "
         "match_classes (string[] from news|listing|search|mail|docs), "
-        "wants_close (bool), label (short), reply (short). "
-        "If they ask to delete/close a kind of tab, set wants_close true "
-        "and match_classes — do not say 'when stale'. User said:\n"
+        "wants_close (bool), label (short), reply (the answer, under 500 chars). "
+        "User said:\n"
         f"{message[:500]}"
     )
     url = (
@@ -289,12 +317,79 @@ def _try_gemini(message: str) -> ChatIntent | None:
         unused_days=cutoff if raw.get("wants_close") else None,
         keep_hosts=_hosts_from(raw.get("keep_hosts")),
         close_hosts=_hosts_from(raw.get("close_hosts")),
-        match_classes=_uniq(str(x).lower() for x in (raw.get("match_classes") or []) if str(x).strip()),
+        match_classes=_uniq(
+            str(x).lower() for x in (raw.get("match_classes") or []) if str(x).strip()
+        ),
         wants_close=bool(raw.get("wants_close")),
         label=str(raw.get("label") or "")[:80],
-        reply=str(raw.get("reply") or "")[:400],
+        reply=str(raw.get("reply") or "")[:700],
         parser="gemini",
     )
+
+
+def _is_product_question(text: str) -> bool:
+    lower = text.lower()
+    if _QUESTION_RE.search(text) or text.strip().endswith("?"):
+        return True
+    return any(
+        word in lower
+        for word in (
+            "stale",
+            "rescan",
+            "demo seed",
+            "restore",
+            "still open",
+            "this app",
+            "this tool",
+        )
+    )
+
+
+def _help_reply(text: str) -> str:
+    lower = text.lower()
+    if "stale" in lower or "unused" in lower:
+        return (
+            "Unused means you haven't looked at the tab in a while — 7 days by "
+            "default. Asking to close unused tabs lists every idle tab that long, "
+            "except pinned, playing audio, or protected sites. It does not depend "
+            "on whether you closed that site before."
+        )
+    if "restore" in lower or "undo" in lower:
+        return (
+            "Restore reopens tabs Still Open closed in the last 30 days, grouped "
+            "by the task name they had when they closed."
+        )
+    if "rescan" in lower:
+        return (
+            "Rescan looks at the current window again and names tasks. Labels you "
+            "typed yourself are kept; inferred ones can change."
+        )
+    if "demo" in lower:
+        return (
+            "Demo Seed opens a messy sample window of public pages so you can try "
+            "grouping without using personal tabs."
+        )
+    if "ignore" in lower or "not in a task" in lower or lower.strip() in {"x", "×"}:
+        return (
+            "× takes a tab out of the task but leaves it open. It lands under "
+            "Not in a task so you can drag it back."
+        )
+    if "done" in lower or "file" in lower:
+        return (
+            "Done, close! finishes that task. If it was durable work we save it to "
+            "Google first, then close the tabs only if that save worked."
+        )
+    if "protect" in lower or "chase" in lower or "bank" in lower:
+        return (
+            "Bank, health, and government tabs stay in a protected pile. They are "
+            "never sent to a model and we won't close them for you."
+        )
+    if "task" in lower or "group" in lower:
+        return (
+            "A task is the unfinished job those tabs were for — “Definition for "
+            "ephemeral”, not “BBC News”. Same job together, different jobs split."
+        )
+    return _PRODUCT
 
 
 def _days(count: str | None, unit: str) -> int:
@@ -367,6 +462,7 @@ def _reply(
     if close:
         return "I'll look for " + ", ".join(close) + "."
     return (
+        "Ask how tasks, Rescan, Restore, or Done work — or tell me which tabs to close. "
         "Try: “delete any news tabs”, “delete tabs I haven't used in a week”, "
         "or “never close github.com”."
     )

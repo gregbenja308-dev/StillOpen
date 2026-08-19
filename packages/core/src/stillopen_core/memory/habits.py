@@ -92,7 +92,6 @@ def observe_close(profile: HabitProfile, event: HabitEvent) -> HabitProfile:
     stat.touch()
 
     keep = profile.rule_for(host)
-    inferred = False
     if keep is None or keep.close_policy is ClosePolicy.FILE_THEN_CLOSE:
         should_infer = event.kind is FeedbackKind.STILLOPEN_CLOSE or (
             event.kind is FeedbackKind.USER_CLOSE and stat.user_closed >= _USER_CLOSE_INFER_AT
@@ -112,7 +111,6 @@ def observe_close(profile: HabitProfile, event: HabitEvent) -> HabitProfile:
                 keep.source = event.kind.value
                 keep.phrase = event.phrase or keep.phrase
                 keep.touch()
-            inferred = True
     after = {
         "user_closed": stat.user_closed,
         "stillopen_closed": stat.stillopen_closed,
@@ -120,8 +118,6 @@ def observe_close(profile: HabitProfile, event: HabitEvent) -> HabitProfile:
     }
     who = "you closed" if event.kind is FeedbackKind.USER_CLOSE else "you let Still Open close"
     summary = f"{who} {host}"
-    if inferred:
-        summary += " — now treated as ok to close when stale"
     append_mutation(
         profile,
         Mutation(
@@ -179,7 +175,9 @@ def apply_habit_hint(tab: SanitizedTab, profile: HabitProfile, current: CloseHin
     return current
 
 
-def set_cutoff(profile: HabitProfile, days: int, *, source: str, phrase: str | None = None) -> HabitProfile:
+def set_cutoff(
+    profile: HabitProfile, days: int, *, source: str, phrase: str | None = None
+) -> HabitProfile:
     before = profile.stale_cutoff_days
     profile.stale_cutoff_days = max(1, min(int(days), 90))
     if before == profile.stale_cutoff_days and source != "chat":

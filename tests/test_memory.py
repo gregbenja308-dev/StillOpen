@@ -7,7 +7,17 @@ from stillopen_core.schemas.habit import ClosePolicy, FeedbackKind, HabitEvent, 
 from stillopen_core.schemas.tab import TabSnapshot
 
 
-def test_chat_unused_week_sets_cutoff() -> None:
+def test_chat_answers_what_stale_means() -> None:
+    intent = parse_preference("what does stale mean?")
+    assert intent.wants_close is False
+    assert "7 days" in intent.reply
+    assert "does not depend" in intent.reply.lower()
+
+
+def test_chat_explains_the_product() -> None:
+    intent = parse_preference("what does this app do")
+    assert intent.wants_close is False
+    assert "task" in intent.reply.lower()
     intent = parse_preference("I want to delete tabs that I haven't used in a week")
     assert intent.stale_cutoff_days == 7
     profile = HabitProfile(user_id="local-dev")
@@ -30,9 +40,13 @@ def test_chat_never_close_host() -> None:
 
 def test_user_close_infers_after_two() -> None:
     profile = HabitProfile(user_id="u")
-    mutate(profile, HabitEvent(kind=FeedbackKind.USER_CLOSE, host_suffix="reddit.com", source="chrome"))
+    mutate(
+        profile, HabitEvent(kind=FeedbackKind.USER_CLOSE, host_suffix="reddit.com", source="chrome")
+    )
     assert profile.rule_for("reddit.com") is None
-    mutate(profile, HabitEvent(kind=FeedbackKind.USER_CLOSE, host_suffix="reddit.com", source="chrome"))
+    mutate(
+        profile, HabitEvent(kind=FeedbackKind.USER_CLOSE, host_suffix="reddit.com", source="chrome")
+    )
     rule = profile.rule_for("reddit.com")
     assert rule is not None
     assert rule.close_policy is ClosePolicy.FILE_THEN_CLOSE

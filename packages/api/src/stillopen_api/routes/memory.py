@@ -30,7 +30,7 @@ class ChatRequest(BaseModel):
 
     user_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=500)
-    tabs: list[TabSnapshot] = Field(default_factory=list, max_length=80)
+    tabs: list[TabSnapshot] = Field(default_factory=list, max_length=200)
 
 
 class ChatResponse(BaseModel):
@@ -174,7 +174,7 @@ class CategorizeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str = Field(min_length=1, max_length=128)
-    tabs: list[TabSnapshot] = Field(min_length=1, max_length=80)
+    tabs: list[TabSnapshot] = Field(min_length=1, max_length=200)
 
 
 class CategorizeResponse(BaseModel):

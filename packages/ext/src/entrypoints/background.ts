@@ -7,14 +7,18 @@ import {
   applyClose,
   consumeClosing,
   lookupTab,
-  peekUndo,
+  peekBatches,
   rememberTab,
+  restoreBatch,
   snapshotAllWindows,
   snapshotCurrentWindow,
-  undoClose,
 } from "@/lib/tabs";
 
 const DAILY_ALARM = "stillopen-daily-scan";
+
+function ping(reason: "created" | "removed" | "updated", tabId?: number): void {
+  chrome.runtime.sendMessage({ type: "TABS_CHANGED", reason, tabId }).catch(() => undefined);
+}
 
 async function refreshBadge(): Promise<number> {
   const [tabs, cutoff] = await Promise.all([snapshotAllWindows(), getCutoffDays()]);
@@ -36,13 +40,18 @@ export default defineBackground(() => {
     void runDueSchedule(alarm.name);
   });
 
-  chrome.tabs.onUpdated.addListener((_id, _info, tab) => {
+  chrome.tabs.onUpdated.addListener((id, info, tab) => {
     void rememberTab(tab);
+    if (info.url || info.title) {
+      ping("updated", id);
+    }
   });
   chrome.tabs.onCreated.addListener((tab) => {
     void rememberTab(tab);
+    ping("created", tab.id);
   });
   chrome.tabs.onRemoved.addListener((tabId, info) => {
+    ping("removed", tabId);
     if (info.isWindowClosing) {
       return;
     }
@@ -69,7 +78,14 @@ export default defineBackground(() => {
 
   chrome.runtime.onMessage.addListener(
     (
-      message: { type?: string; tabIds?: number[]; scheduleId?: string; whenMs?: number },
+      message: {
+        type?: string;
+        tabIds?: number[];
+        scheduleId?: string;
+        whenMs?: number;
+        label?: string;
+        batchId?: string;
+      },
       _sender,
       sendResponse,
     ) => {
@@ -91,13 +107,19 @@ export default defineBackground(() => {
       return true;
     }
     if (message.type === "APPLY_CLOSE") {
-      applyClose(message.tabIds ?? [])
+      applyClose(message.tabIds ?? [], typeof message.label === "string" ? message.label : "Closed")
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
       return true;
     }
+    if (message.type === "RESTORE_BATCH") {
+      restoreBatch(typeof message.batchId === "string" ? message.batchId : "")
+        .then((restored) => sendResponse({ ok: true, restored }))
+        .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
+      return true;
+    }
     if (message.type === "UNDO") {
-      undoClose()
+      restoreBatch(typeof message.batchId === "string" ? message.batchId : "")
         .then((restored) => sendResponse({ ok: true, restored }))
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
       return true;
@@ -116,9 +138,9 @@ export default defineBackground(() => {
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
       return true;
     }
-    if (message.type === "UNDO_PREVIEW") {
-      peekUndo()
-        .then((rows) => sendResponse({ ok: true, rows }))
+    if (message.type === "UNDO_PREVIEW" || message.type === "RESTORE_PREVIEW") {
+      peekBatches()
+        .then((batches) => sendResponse({ ok: true, batches }))
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
       return true;
     }

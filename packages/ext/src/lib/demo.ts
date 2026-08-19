@@ -1,4 +1,4 @@
-/** Synthetic house-hunt window. Public URLs only — never a personal dump. */
+/** Synthetic messy window. Public URLs only — never a personal dump. */
 export const DEMO_COMMAND = "close the tabs relating to house shopping";
 
 export const DEMO_TABS = [
@@ -9,6 +9,20 @@ export const DEMO_TABS = [
   { url: "https://www.nytimes.com/section/realestate", label: "NYT real estate" },
   { url: "https://www.chase.com/", label: "Chase (never sent to the model)" },
   { url: "https://www.realtor.com/realestateandhomes-search/Austin_TX", label: "Realtor Austin" },
+  { url: "https://www.apartments.com/austin-tx/", label: "Apartments.com Austin" },
+  { url: "https://austin.craigslist.org/search/apa", label: "Craigslist Austin apts" },
+  { url: "https://www.merriam-webster.com/dictionary/ephemeral", label: "Dictionary: ephemeral" },
+  { url: "https://en.wikipedia.org/wiki/Ephemeral", label: "Wikipedia: Ephemeral" },
+  { url: "https://www.google.com/search?q=what+does+ephemeral+mean", label: "Google: ephemeral" },
+  { url: "https://www.amazon.com/s?k=macbook+air", label: "Amazon: MacBook Air" },
+  { url: "https://www.bestbuy.com/site/searchpage.jsp?st=macbook+air", label: "Best Buy: MacBook Air" },
+  { url: "https://www.apple.com/macbook-air/", label: "Apple MacBook Air" },
+  { url: "https://www.ups.com/track?loc=en_US", label: "UPS tracking" },
+  { url: "https://www.bbc.com/news", label: "BBC News" },
+  { url: "https://github.com/google/adk-python", label: "GitHub: google/adk-python" },
+  { url: "https://www.reddit.com/r/AustinApartments/", label: "Reddit: AustinApartments" },
+  { url: "https://stackoverflow.com/questions/tagged/python", label: "Stack Overflow: python" },
+  { url: "https://www.nytimes.com/section/technology", label: "NYT technology" },
 ] as const;
 
 function hostPath(url: string): { host: string; path: string } | null {
@@ -35,19 +49,6 @@ export function alreadyOpen(existingUrl: string, demoUrl: string): boolean {
   return live.path === demo.path || live.path.startsWith(`${demo.path}/`);
 }
 
-function isHousingDemo(url: string): boolean {
-  const parsed = hostPath(url);
-  if (!parsed) {
-    return false;
-  }
-  if (parsed.host === "google.com") {
-    return parsed.path.startsWith("/search");
-  }
-  return ["zillow.com", "redfin.com", "realtor.com"].some(
-    (host) => parsed.host === host || parsed.host.endsWith(`.${host}`),
-  );
-}
-
 export async function openDemoTabs(): Promise<{ opened: number; already: number }> {
   const tabs = await chrome.tabs.query({ currentWindow: true });
   const live = tabs.map((tab) => tab.url ?? "");
@@ -60,19 +61,6 @@ export async function openDemoTabs(): Promise<{ opened: number; already: number 
     }
     await chrome.tabs.create({ url: demo.url, active: false });
     opened += 1;
-  }
-  const after = await chrome.tabs.query({ currentWindow: true });
-  const housing = after.filter(
-    (tab): tab is chrome.tabs.Tab & { id: number } =>
-      typeof tab.id === "number" && Boolean(tab.url) && isHousingDemo(tab.url ?? ""),
-  );
-  if (housing.length >= 2) {
-    try {
-      const groupId = await chrome.tabs.group({ tabIds: housing.map((tab) => tab.id) });
-      await chrome.tabGroups.update(groupId, { title: "Austin rentals", collapsed: false });
-    } catch {
-      // Grouping is a demo hint; ignore if Chrome refuses.
-    }
   }
   return { opened, already };
 }

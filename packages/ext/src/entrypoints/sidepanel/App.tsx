@@ -1,8 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { ChatBox } from "./ChatBox";
+import { ChatHits } from "./ChatHits";
 import { MemoryView } from "./MemoryView";
 import { UndoView } from "./UndoView";
 import { Workbench } from "./Workbench";
+import {
+  dropLoose,
+  ignoreTab,
+  loadBoard,
+  looseTabs,
+  moveTab,
+  newTask,
+  pruneBoard,
+  saveBoard,
+  type Board,
+} from "@/lib/board";
 import {
   createPlan,
   getMemory,
@@ -12,9 +25,23 @@ import {
   observeMemory,
   runPlan,
 } from "@/lib/api";
-import type { CloseReply, DemoReply, SnapshotReply, UndoPreviewReply, UndoReply } from "@/lib/messaging";
+import type {
+  CloseReply,
+  DemoReply,
+  RestorePreviewReply,
+  SnapshotReply,
+  TabChangeMsg,
+  UndoReply,
+} from "@/lib/messaging";
 import { send } from "@/lib/messaging";
-import type { MemoryDump, OpenTask, RunResponse, TabSnapshot, UndoRow } from "@/lib/schema";
+import type {
+  ChatResponse,
+  CloseBatch,
+  MemoryDump,
+  OpenTask,
+  RunResponse,
+  TabSnapshot,
+} from "@/lib/schema";
 
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -25,19 +52,47 @@ export function App() {
   const [memory, setMemory] = useState<MemoryDump | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [undoRows, setUndoRows] = useState<UndoRow[]>([]);
-  const [tasks, setTasks] = useState<OpenTask[]>([]);
+  const [batches, setBatches] = useState<CloseBatch[]>([]);
+  const [board, setBoard] = useState<Board>({ tasks: [], ignored: [] });
   const [snapshots, setSnapshots] = useState<TabSnapshot[]>([]);
   const [scanning, setScanning] = useState(false);
   const [lastRun, setLastRun] = useState<RunResponse | null>(null);
   const [googleOk, setGoogleOk] = useState<{ connected: boolean; configured: boolean } | null>(null);
+  const [hits, setHits] = useState<{ prompt: string; result: ChatResponse } | null>(null);
+  const [burst, setBurst] = useState(false);
+  const boardRef = useRef(board);
+  const inferTimer = useRef(0);
+  const pruneTimer = useRef(0);
+
+  boardRef.current = board;
 
   useEffect(() => {
     void refreshUndo();
-    void loadMemory().then(() => scan());
+    void loadMemory().then(() => scan(true));
     void googleAuthStatus()
       .then(setGoogleOk)
       .catch(() => setGoogleOk(null));
+  }, []);
+
+  useEffect(() => {
+    const onMsg = (message: TabChangeMsg) => {
+      if (message.type !== "TABS_CHANGED") {
+        return;
+      }
+      if (message.reason === "removed") {
+        window.clearTimeout(pruneTimer.current);
+        pruneTimer.current = window.setTimeout(() => {
+          void localPrune();
+        }, 80);
+        return;
+      }
+      window.clearTimeout(inferTimer.current);
+      inferTimer.current = window.setTimeout(() => {
+        void scan(false);
+      }, 1200);
+    };
+    chrome.runtime.onMessage.addListener(onMsg);
+    return () => chrome.runtime.onMessage.removeListener(onMsg);
   }, []);
 
   useEffect(() => {
@@ -61,13 +116,27 @@ export function App() {
   }
 
   async function refreshUndo() {
-    const reply = await send<UndoPreviewReply>({ type: "UNDO_PREVIEW" });
+    const reply = await send<RestorePreviewReply>({ type: "RESTORE_PREVIEW" });
     if (reply.ok) {
-      setUndoRows(reply.rows);
+      setBatches(reply.batches);
     }
   }
 
-  async function scan() {
+  async function commit(next: Board) {
+    setBoard(next);
+    await saveBoard(next);
+  }
+
+  async function localPrune() {
+    const reply = await send<SnapshotReply>({ type: "SNAPSHOT" });
+    if (!reply.ok) {
+      return;
+    }
+    setSnapshots(reply.tabs);
+    await commit(pruneBoard(boardRef.current, reply.tabs));
+  }
+
+  async function scan(full: boolean) {
     setScanning(true);
     try {
       const reply = await send<SnapshotReply>({ type: "SNAPSHOT" });
@@ -75,9 +144,22 @@ export function App() {
         throw new Error(reply.error);
       }
       setSnapshots(reply.tabs);
+      const saved = full && boardRef.current.tasks.length === 0 ? await loadBoard() : boardRef.current;
+      const pruned = pruneBoard(saved, reply.tabs);
       const dump = memory ?? (await loadMemory());
       const cutoff = dump?.profile.stale_cutoff_days ?? 7;
-      setTasks(await inferTasks(reply.tabs, cutoff));
+      if (reply.tabs.length === 0) {
+        await commit(pruned);
+        return;
+      }
+      const inferred = await inferTasks(reply.tabs, {
+        cutoffDays: cutoff,
+        existing: pruned.tasks.filter(
+          (task) => task.user_locked || task.kind === "protected",
+        ),
+        ignoredUrls: pruned.ignored,
+      });
+      await commit({ tasks: inferred, ignored: pruned.ignored });
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -85,28 +167,15 @@ export function App() {
     }
   }
 
-  async function closeTabs(tabIds: number[]): Promise<number> {
-    const reply = await send<CloseReply>({ type: "APPLY_CLOSE", tabIds });
+  async function closeTabs(tabIds: number[], label: string): Promise<number> {
+    const reply = await send<CloseReply>({ type: "APPLY_CLOSE", tabIds, label });
     if (!reply.ok) {
       throw new Error(reply.error);
     }
     if (reply.closed > 0) {
-      setUndoRows(reply.rows);
+      await refreshUndo();
     }
     return reply.closed;
-  }
-
-  async function onKeepGoing(task: OpenTask) {
-    setBusy(true);
-    try {
-      for (const host of task.hosts) {
-        await observeMemory({ kind: "keep", host, title: task.label, source: "task" });
-      }
-      setNotice(`Keeping “${task.label}”.`);
-      await loadMemory();
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function onDone(task: OpenTask) {
@@ -114,7 +183,7 @@ export function App() {
     try {
       const tabs = snapshots.filter((tab) => task.tab_ids.includes(tab.tab_id));
       if (tabs.length === 0) {
-        throw new Error("Those tabs are gone. Refresh.");
+        throw new Error("Those tabs are gone.");
       }
       if (task.kind === "durable") {
         const plan = await createPlan(task.label, tabs, { forceFile: true });
@@ -128,18 +197,36 @@ export function App() {
           return;
         }
         const closeIds = run.apply.close_tab_ids.filter((id) => task.tab_ids.includes(id));
-        const closed = closeIds.length ? await closeTabs(closeIds) : 0;
-        setView("undo");
-        setNotice(
-          closed > 0 ? `Saved, then closed ${plural(closed, "tab")}.` : "Saved. Nothing to close.",
-        );
+        await closeTabs(closeIds.length ? closeIds : task.tab_ids, task.label);
       } else {
-        const closed = await closeTabs(task.tab_ids);
-        setView("undo");
-        setNotice(closed > 0 ? `Closed ${plural(closed, "tab")}.` : "Nothing to close.");
+        await closeTabs(task.tab_ids, task.label);
       }
-      await scan();
+      await observeMemory({
+        kind: "stillopen_close",
+        host: task.hosts[0] ?? "",
+        title: task.label,
+        source: "task",
+      });
+      setBurst(true);
+      window.setTimeout(() => setBurst(false), 900);
+      setNotice(`Closed “${task.label}”.`);
+      await scan(false);
       await loadMemory();
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onChatClose(tabIds: number[], label: string) {
+    setBusy(true);
+    try {
+      await closeTabs(tabIds, label || "Ask");
+      setHits(null);
+      setBurst(true);
+      window.setTimeout(() => setBurst(false), 900);
+      await scan(false);
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -155,7 +242,7 @@ export function App() {
         throw new Error(reply.error);
       }
       setNotice(reply.opened === 0 ? "Demo tabs are already here." : "Demo window ready.");
-      await scan();
+      await scan(true);
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -163,34 +250,37 @@ export function App() {
     }
   }
 
-  async function onUndo() {
+  async function onRestore(batchId: string) {
     setBusy(true);
     try {
-      const reply = await send<UndoReply>({ type: "UNDO" });
+      const batch = batches.find((row) => row.batch_id === batchId);
+      const reply = await send<UndoReply>({ type: "RESTORE_BATCH", batchId });
       if (!reply.ok) {
         throw new Error(reply.error);
       }
-      for (const row of undoRows) {
-        const host = (() => {
-          try {
-            return new URL(row.url).hostname.replace(/^www\./, "");
-          } catch {
-            return "";
-          }
-        })();
-        if (host) {
-          await observeMemory({ kind: "undo", host, title: row.title, source: "undo" });
+      for (const row of batch?.rows ?? []) {
+        try {
+          await observeMemory({
+            kind: "undo",
+            host: new URL(row.url).hostname.replace(/^www\./, ""),
+            title: row.title,
+            source: "undo",
+          });
+        } catch {
+          /* ignore bad urls */
         }
       }
-      setUndoRows([]);
       setNotice(`Restored ${plural(reply.restored, "tab")}.`);
-      await scan();
+      await refreshUndo();
+      await scan(false);
     } catch (error) {
       setNotice(String(error));
     } finally {
       setBusy(false);
     }
   }
+
+  const loose = looseTabs(snapshots, board);
 
   return (
     <main>
@@ -206,7 +296,7 @@ export function App() {
             void refreshUndo();
           }}
         >
-          Restore{undoRows.length ? ` (${undoRows.length})` : ""}
+          Restore{batches.length ? ` (${batches.length})` : ""}
         </button>
         <button
           type="button"
@@ -229,17 +319,50 @@ export function App() {
       {view === "memory" ? (
         <MemoryView dump={memory} />
       ) : view === "undo" ? (
-        <UndoView rows={undoRows} lastRun={lastRun} busy={busy} onRestore={() => void onUndo()} />
+        <UndoView batches={batches} lastRun={lastRun} busy={busy} onRestore={(id) => void onRestore(id)} />
       ) : (
         <>
+          <ChatBox
+            busy={busy}
+            onApplied={(result, prompt) => {
+              if (result.wants_close) {
+                setHits({ prompt, result });
+                return;
+              }
+              void loadMemory();
+            }}
+          />
+          {hits ? (
+            <ChatHits
+              label={hits.result.label || hits.prompt}
+              matches={hits.result.matches}
+              busy={busy}
+              onDismiss={() => setHits(null)}
+              onClose={(ids) => void onChatClose(ids, hits.result.label || hits.prompt)}
+            />
+          ) : null}
           <Workbench
-            tasks={tasks}
+            tasks={board.tasks}
+            live={snapshots}
+            loose={loose}
             scanning={scanning}
             busy={busy}
-            onRefresh={() => void scan()}
+            burst={burst}
+            onRefresh={() => void scan(true)}
             onDemo={() => void onDemo()}
+            onNewTask={() => void commit({ ...board, tasks: [newTask(), ...board.tasks] })}
             onDone={(task) => void onDone(task)}
-            onKeepGoing={(task) => void onKeepGoing(task)}
+            onRename={(taskId, label) => {
+              void commit({
+                ...board,
+                tasks: board.tasks.map((task) =>
+                  task.task_id === taskId ? { ...task, label, user_locked: true } : task,
+                ),
+              });
+            }}
+            onIgnore={(taskId, tabId) => void commit(ignoreTab(board, taskId, tabId, snapshots))}
+            onMove={(tabId, fromId, toId) => void commit(moveTab(board, tabId, fromId, toId, snapshots))}
+            onDropLoose={(tabId, toId) => void commit(dropLoose(board, tabId, toId, snapshots))}
           />
           <p className="foot">
             {googleOk?.connected

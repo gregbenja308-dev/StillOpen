@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from stillopen_core.schemas.base import StillOpenModel
 
@@ -42,6 +42,14 @@ class CloseHint(str, Enum):
 class TabSnapshot(StillOpenModel):
     """One tab as seen by the extension. Extracts are optional and opt-in."""
 
+    model_config = ConfigDict(
+        strict=True,
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        frozen=False,
+    )
+
     tab_id: int
     window_id: int
     index: int
@@ -60,12 +68,25 @@ class TabSnapshot(StillOpenModel):
         description="Optional page snippet. Never sent for deny-listed hosts.",
     )
 
+    @field_validator("tab_id", "window_id", "index", "group_id", mode="before")
+    @classmethod
+    def _coerce_int(cls, value: object) -> object:
+        if isinstance(value, bool) or value is None or value == "":
+            return value
+        try:
+            return int(float(str(value)))
+        except (TypeError, ValueError):
+            return value
+
     @field_validator("last_accessed_ms", mode="before")
     @classmethod
     def _coerce_ms(cls, value: object) -> int | None:
         if value is None or value == "":
             return None
-        return int(value)  # type: ignore[arg-type]
+        try:
+            return int(float(str(value)))
+        except (TypeError, ValueError):
+            return None
 
 
 class SanitizedTab(StillOpenModel):

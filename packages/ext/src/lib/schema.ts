@@ -84,7 +84,14 @@ export const undoRowSchema = z.object({
   title: z.string(),
 });
 
-export type UndoRow = z.infer<typeof undoRowSchema>;
+export const closeBatchSchema = z.object({
+  batch_id: z.string(),
+  label: z.string(),
+  closed_at: z.number(),
+  rows: z.array(undoRowSchema),
+});
+
+export type CloseBatch = z.infer<typeof closeBatchSchema>;
 
 export const memoryProfileSchema = z
   .object({
@@ -174,9 +181,11 @@ export const openTaskSchema = z.object({
   kind: z.enum(["durable", "ephemeral", "protected"]),
   hosts: z.array(z.string()).default([]),
   titles: z.array(z.string()).default([]),
+  urls: z.array(z.string()).default([]),
   group_title: z.string().default(""),
   quiet: z.boolean().default(false),
   intention: z.string().default("unknown"),
+  user_locked: z.boolean().default(false),
 });
 
 export const inferTasksResponseSchema = z.object({

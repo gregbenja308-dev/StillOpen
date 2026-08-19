@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from stillopen_core.config import get_settings
+from stillopen_core.gateway.router import reset_gateway
 from stillopen_core.memory.fakes import reset_bank
 from stillopen_core.schemas.tab import TabSnapshot
 
@@ -17,9 +18,11 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "seeded_window.json
 def _reset() -> None:
     get_settings.cache_clear()
     reset_bank()
+    reset_gateway()
     yield
     get_settings.cache_clear()
     reset_bank()
+    reset_gateway()
 
 
 @pytest.fixture
