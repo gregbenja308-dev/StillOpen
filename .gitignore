@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# uv
+.venv/
+.uv/
+
+# Test / coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+
+# Environments and secrets — never commit
+.env
+.env.*
+!.env.example
+.envrc
+
+# Local encrypted token / snapshot cache
+.stillopen/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# GCP keys
+service-account*.json
+*-key.json
+gcloud-credentials/
+
+# Local artifacts
+tmp/
+scratch/
+*.log
+.tools/
+
+# Chrome extension
+packages/ext/*.pem
+packages/ext/key.pem
+packages/ext/.output/
+packages/ext/dist/
+packages/ext/.wxt/
