@@ -1,6 +1,6 @@
 import {
-  categorizeResponseSchema,
   chatResponseSchema,
+  inferTasksResponseSchema,
   memoryDumpSchema,
   planSchema,
   runResponseSchema,
@@ -9,10 +9,10 @@ import {
   type MemoryDump,
   type MatchedTab,
   type ObserveKind,
+  type OpenTask,
   type Plan,
   type RunResponse,
   type ScheduledClose,
-  type TabGroup,
   type TabSnapshot,
 } from "./schema";
 
@@ -154,19 +154,19 @@ export async function scheduleClose(input: {
   return scheduledCloseSchema.parse(body);
 }
 
-export async function categorizeTabs(tabs: TabSnapshot[]): Promise<TabGroup[]> {
+export async function inferTasks(tabs: TabSnapshot[], cutoffDays = 7): Promise<OpenTask[]> {
   if (tabs.length === 0) {
     return [];
   }
   const [base, uid] = await Promise.all([apiBase(), userId()]);
   const body = await readJson(
-    await fetch(`${base}/v1/memory/categorize`, {
+    await fetch(`${base}/v1/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: uid, tabs }),
+      body: JSON.stringify({ user_id: uid, tabs, cutoff_days: cutoffDays }),
     }),
   );
-  return categorizeResponseSchema.parse(body).groups;
+  return inferTasksResponseSchema.parse(body).tasks;
 }
 
 export async function finishSchedule(scheduleId: string, status = "done"): Promise<void> {

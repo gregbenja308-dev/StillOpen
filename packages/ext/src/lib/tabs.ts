@@ -33,6 +33,19 @@ async function snapshot(query: chrome.tabs.QueryInfo, mode: "replace" | "merge")
   }));
   await persistUndo(undo, mode);
 
+  const groupIds = [...new Set(live.map((tab) => tab.groupId).filter((id) => id >= 0))];
+  const groupTitles = new Map<number, string>();
+  await Promise.all(
+    groupIds.map(async (id) => {
+      try {
+        const group = await chrome.tabGroups.get(id);
+        groupTitles.set(id, group.title ?? "");
+      } catch {
+        groupTitles.set(id, "");
+      }
+    }),
+  );
+
   return live.map((tab) => ({
     tab_id: tab.id,
     window_id: tab.windowId,
@@ -44,6 +57,7 @@ async function snapshot(query: chrome.tabs.QueryInfo, mode: "replace" | "merge")
     discarded: Boolean(tab.discarded),
     active: Boolean(tab.active),
     group_id: tab.groupId ?? -1,
+    group_title: groupTitles.get(tab.groupId ?? -1) ?? "",
     last_accessed_ms: tab.lastAccessed && tab.lastAccessed > 0 ? tab.lastAccessed : null,
     extract: null,
   }));

@@ -35,6 +35,19 @@ export function alreadyOpen(existingUrl: string, demoUrl: string): boolean {
   return live.path === demo.path || live.path.startsWith(`${demo.path}/`);
 }
 
+function isHousingDemo(url: string): boolean {
+  const parsed = hostPath(url);
+  if (!parsed) {
+    return false;
+  }
+  if (parsed.host === "google.com") {
+    return parsed.path.startsWith("/search");
+  }
+  return ["zillow.com", "redfin.com", "realtor.com"].some(
+    (host) => parsed.host === host || parsed.host.endsWith(`.${host}`),
+  );
+}
+
 export async function openDemoTabs(): Promise<{ opened: number; already: number }> {
   const tabs = await chrome.tabs.query({ currentWindow: true });
   const live = tabs.map((tab) => tab.url ?? "");
@@ -47,6 +60,19 @@ export async function openDemoTabs(): Promise<{ opened: number; already: number 
     }
     await chrome.tabs.create({ url: demo.url, active: false });
     opened += 1;
+  }
+  const after = await chrome.tabs.query({ currentWindow: true });
+  const housing = after.filter(
+    (tab): tab is chrome.tabs.Tab & { id: number } =>
+      typeof tab.id === "number" && Boolean(tab.url) && isHousingDemo(tab.url ?? ""),
+  );
+  if (housing.length >= 2) {
+    try {
+      const groupId = await chrome.tabs.group({ tabIds: housing.map((tab) => tab.id) });
+      await chrome.tabGroups.update(groupId, { title: "Austin rentals", collapsed: false });
+    } catch {
+      // Grouping is a demo hint; ignore if Chrome refuses.
+    }
   }
   return { opened, already };
 }

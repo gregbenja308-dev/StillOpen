@@ -1,17 +1,17 @@
 # Still Open
 
-Treat an open tab as unfinished business. **File it into Google, then close.**
+**Name the open task. Ask if it is done. Close that pile.**
 
 Hackathon: [All Things Agentic](https://allthingsagentichackathon.devpost.com/) — **Taskmaster**.
 
 ```
-Extension snapshot → Surveyor redact → Framer
-        → ADK Clerk (Gemini 3.5) → Runner (Docs/Calendar) → Verifier
+Extension snapshot → named tasks (Chrome groups + Framer + Gemini)
+        → I'm done on a durable job → ADK Clerk → Runner (Docs/Calendar) → Verifier
         → close only if artifacts_ok → Watch enroll
         → Cloud Scheduler → hash-only tick
 ```
 
-Chat is a side channel. The scoring beat is **File first, close last**.
+The workbench is **named tasks**, not categories. File is the done-path when the job should survive the tab strip. A word-lookup just closes.
 
 ## Why this extension is allowed to see tabs
 
@@ -38,7 +38,7 @@ Chrome → `chrome://extensions` → Developer mode → Load unpacked → `packa
 
 ```bash
 # Workbench
-Open demo tabs → Ask “house shopping” → File, then close → Undo lists exact sites
+Open demo tabs → “Find a place in Austin” → I’m done → File, then close → Restore
 ```
 
 ## Cloud (judges)

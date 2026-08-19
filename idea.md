@@ -1,6 +1,6 @@
 # Still Open
 
-**Treat an open tab as unfinished business. Finish it or file it into Google.**
+**People leave tabs open because a task is not done. We name the task, ask if it is done, then close that pile.**
 
 **Hackathon:** [All Things Agentic Hackathon](https://allthingsagentichackathon.devpost.com/)
 **Track:** Taskmaster
@@ -13,15 +13,43 @@ Name: **Still Open** — not AgentFlow, not TabPilot.
 
 ---
 
-## Thesis
+## Product direction (lock this)
 
-Chrome already **clusters** tabs by similarity. The open move is to ask a different question:
+People open tabs to **do something**. The something can be tiny (what does this word mean) or large (find a house to rent). They will not close those tabs until they feel **done with that task**. Category buckets (“News”, “Housing”) are the wrong unit. Chrome already groups by similarity. We group by **goal**.
 
-> Why is this still open — and what would *finish* it?
+**Loop:**
 
-An open tab is not a topic. It is a suspended intention: waiting, comparing, reading later, half-done, reference, or zombie. The agent classifies that intention, then **does the next real step** — writes a Doc, calendars a check, drafts a mail, closes the rest — instead of painting another colored group on the tab strip.
+1. Read the window: titles, URLs, `lastAccessed`, and **the user’s existing Chrome tab groups** (a group the human made is a strong task prior — we do not restyle it).
+2. Infer **named tasks**, not host classes. Example: “Find a house to rent” covering three Zillow tabs + a Redfin tab + the Google search that started it. A dictionary lookup is its own small task.
+3. Ask, in plain language: *Have you finished finding a house to rent?*
+4. If **yes** → close the related tabs (Restore can rewind). If the task produced work worth keeping (a comparison, a tracking date), **File** that pile into Google *as the done-path*, then close. A word-lookup does not get a Doc.
+5. If **not yet** → leave the pile. Optionally Watch (calendar a check). Do not nag-close.
 
-Chat is a side channel. The workbench of verbs is the UI. Google (Docs, Drive, Calendar, Gmail, Tasks, saved groups) is where the work **lands**.
+**File is not the product.** File is what “done” looks like when the job should survive the tab strip (house hunting → one comparison Doc). Chrome history already has the URL; it does not have the *task*. Small tasks skip File.
+
+**What we will not do:** restyle the tab strip, auto-close because a tab is “news” or unused for 7 days without naming the task, or treat Chrome’s “Shopping” group as the answer.
+
+### Features this implies
+
+| Ship | Not this |
+|---|---|
+| Workbench of **named tasks** (“Find a house to rent”, “Look up ephemeral”) | Daily sweep grouped by category |
+| “Are you done with X?” → Close these N tabs | “Close all housing tabs” as the default ask |
+| Use Chrome groups as a hint for task boundaries | Invent new colored groups |
+| File only when the done-task is durable | File every close into a Doc |
+| Restore tab for last close | Sticky undo dock on the workbench |
+
+### Implementation this implies
+
+- **Framer output = tasks**, each with a human label + member `tab_ids`. Host class is a feature, not the cluster key. Gemini (ADK Clerk / a classify step) names the goal from titles+hosts+group names.
+- **Chat/workbench ask** is done-or-not on a task, not “delete news.”
+- **Close set** = that task’s tabs, user-confirmed. Bank/gov/health still never go to the model.
+- **File** (Docs/Calendar) runs only on tasks whose “done” is an artifact (comparing, waiting). Heuristic: comparing/listings → Doc; waiting → event; lookup/zombie → close only.
+- **Sweep** becomes “tasks you have not opened in N days — still going?” not unused-URL categories.
+
+### Honest gap vs code today (2026-08-18)
+
+The workbench is **named tasks**. Chrome group titles are a prior. Ungrouped listings plus the search that started them become one goal (“Find a place in Austin”). I’m done on a durable job still Files into Google, then closes only if `artifacts_ok`. Ephemeral jobs close only. Chase/gov/health never go to a model. Category sweep (`heuristic_groups`) remains as a test helper, not the UI.
 
 ---
 
@@ -37,12 +65,12 @@ The crowded product is “smart tab groups.” That slot is taken.
 | Pocket / Reading List | Will I read this *later*? | Save. Rarely file. Almost never act. |
 | Web Store “AI tab organizers” | Same as Chrome | Cluster by domain or topic. |
 
-Still Open is new because the **unit of work is the unfinished job**, not the URL cluster.
+Still Open is new because the **unit of work is the unfinished task**, not the URL cluster.
 
-- Chrome: six laptop tabs → a group called “Shopping.”
-- Still Open: six laptop tabs → one comparison Doc, a pick, five tabs closed, a Task if you deferred the buy.
+- Chrome: six listing tabs → a group called “Housing.”
+- Still Open: those tabs → one named task, “Find a house to rent.” We ask if that task is done. If yes, we close *that* pile — and File a comparison Doc only because the decision should outlive the tabs.
 
-A summarizer that leaves 40 tabs open is a chatbot. A grouper that leaves 40 tabs open is Chrome. An agent that **clears by intention** and leaves artifacts in your Google account is a Taskmaster.
+A summarizer that leaves 40 tabs open is a chatbot. A grouper that leaves 40 tabs open is Chrome. An agent that **asks if the task is done** and closes the related tabs is a Taskmaster.
 
 It is also not Level. Level challenges a *yes* against care roles. Still Open challenges a *tab* against the reason you have not closed it.
 
@@ -198,7 +226,7 @@ Track is **Taskmaster**. Judges still score Continuous Action, Evolving Knowledg
 
 | Rubric ask | Design decision |
 |---|---|
-| Eliminate real friction / Twist | Unit of work is the *unfinished job*, not the URL cluster. Chrome groups by topic; we file by intention and land in Google. |
+| Eliminate real friction / Twist | Unit of work is the *named task* (find a rental, look up a word), not a topic cluster. We ask if it is done, then close that pile. File is the done-path for durable jobs. |
 | Taskmaster: multi-step background without you | After Run, Watch rows tick on a timer: hash the tracking page (never store HTML), Task if it changed, Calendar No-Show if the deadline passed. Extension not required. |
 | BYOF | A real messy window (housing + articles + a bank tab that must never be sent to the model). |
 | Collaborative Partner: mutate data | HabitProfile mutates on explicit Uncheck / Undo / Veto only. Next snapshot does not re-litigate. |

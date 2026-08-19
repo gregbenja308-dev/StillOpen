@@ -11,6 +11,7 @@ export const tabSnapshotSchema = z.object({
   discarded: z.boolean(),
   active: z.boolean(),
   group_id: z.number().int(),
+  group_title: z.string().optional().default(""),
   last_accessed_ms: z.number().nullable(),
   extract: z.string().nullable(),
 });
@@ -165,3 +166,21 @@ export type ObserveKind =
   | "user_close"
   | "stillopen_close"
   | "veto_intention";
+
+export const openTaskSchema = z.object({
+  task_id: z.string(),
+  label: z.string(),
+  tab_ids: z.array(z.number().int()),
+  kind: z.enum(["durable", "ephemeral", "protected"]),
+  hosts: z.array(z.string()).default([]),
+  titles: z.array(z.string()).default([]),
+  group_title: z.string().default(""),
+  quiet: z.boolean().default(false),
+  intention: z.string().default("unknown"),
+});
+
+export const inferTasksResponseSchema = z.object({
+  tasks: z.array(openTaskSchema),
+});
+
+export type OpenTask = z.infer<typeof openTaskSchema>;

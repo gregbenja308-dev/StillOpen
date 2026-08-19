@@ -8,7 +8,7 @@ from stillopen_core.config import get_settings
 from stillopen_core.memory.fakes import init_bank
 from stillopen_core.observability.logger import get_logger
 
-from stillopen_api.routes import auth, health, jobs, memory, plans
+from stillopen_api.routes import auth, health, jobs, memory, plans, tasks
 
 _logger = get_logger(__name__)
 
@@ -19,7 +19,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Still Open API",
         version="0.1.0",
-        description="File unfinished tabs into Google. Close is a side-effect of Run.",
+        description="Name the open task. Ask if it is done. Close that pile.",
     )
     app.add_middleware(
         CORSMiddleware,
@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     app.include_router(memory.router)
     app.include_router(auth.router)
     app.include_router(jobs.router)
+    app.include_router(tasks.router)
     _logger.info("api.ready", env=settings.env.value)
     return app
 

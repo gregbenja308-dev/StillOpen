@@ -36,6 +36,7 @@ def sanitize_tabs(tabs: list[TabSnapshot]) -> list[SanitizedTab]:
                 discarded=tab.discarded,
                 active=tab.active,
                 group_id=tab.group_id,
+                group_title=tab.group_title,
                 last_accessed_ms=tab.last_accessed_ms,
                 extract=extract,
                 redacted=changed,

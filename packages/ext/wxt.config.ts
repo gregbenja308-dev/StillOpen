@@ -6,7 +6,7 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "Still Open",
-    description: "Treat an open tab as unfinished business. File it, then close.",
+    description: "Name the open task. Ask if it is done. Close that pile.",
     version: "0.1.0",
     permissions: ["tabs", "tabGroups", "sidePanel", "storage", "alarms"],
     host_permissions: ["http://127.0.0.1:8080/*", "https://*.run.app/*"],

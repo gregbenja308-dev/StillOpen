@@ -52,6 +52,7 @@ class TabSnapshot(StillOpenModel):
     discarded: bool = False
     active: bool = False
     group_id: int = -1
+    group_title: str = ""
     last_accessed_ms: int | None = None
     extract: str | None = Field(
         default=None,
@@ -82,6 +83,7 @@ class SanitizedTab(StillOpenModel):
     discarded: bool
     active: bool
     group_id: int
+    group_title: str = ""
     last_accessed_ms: int | None
     extract: str | None
     redacted: bool
