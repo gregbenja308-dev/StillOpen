@@ -23,7 +23,9 @@ export async function loadBoard(): Promise<Board> {
   const stored = await chrome.storage.local.get({ [KEY]: { tasks: [], ignored: [] } });
   const raw = stored[KEY] as Board;
   return {
-    tasks: Array.isArray(raw?.tasks) ? raw.tasks : [],
+    tasks: Array.isArray(raw?.tasks)
+      ? raw.tasks.map((task) => ({ ...task, notes: task.notes ?? "" }))
+      : [],
     ignored: Array.isArray(raw?.ignored) ? raw.ignored : [],
   };
 }
@@ -149,6 +151,7 @@ export function newTask(label = "New task"): OpenTask {
     quiet: false,
     intention: "unknown",
     user_locked: true,
+    notes: "",
   };
 }
 

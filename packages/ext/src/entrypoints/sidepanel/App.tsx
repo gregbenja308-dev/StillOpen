@@ -16,15 +16,8 @@ import {
   saveBoard,
   type Board,
 } from "@/lib/board";
-import {
-  createPlan,
-  getMemory,
-  googleAuthStatus,
-  googleAuthUrl,
-  inferTasks,
-  observeMemory,
-  runPlan,
-} from "@/lib/api";
+import { getMemory, inferTasks, observeMemory } from "@/lib/api";
+import { loadFiledNotes, saveFiledNote } from "@/lib/notes";
 import type {
   CloseReply,
   DemoReply,
@@ -39,12 +32,24 @@ import type {
   CloseBatch,
   MemoryDump,
   OpenTask,
-  RunResponse,
   TabSnapshot,
 } from "@/lib/schema";
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
+function carryNotes(next: OpenTask[], prev: OpenTask[]): OpenTask[] {
+  const byId = new Map(prev.map((task) => [task.task_id, task]));
+  return next.map((task) => {
+    if (task.notes?.trim()) {
+      return task;
+    }
+    const same = byId.get(task.task_id);
+    if (same?.notes?.trim()) {
+      return { ...task, notes: same.notes };
+    }
+    const overlap = prev.find(
+      (row) => row.notes?.trim() && row.tab_ids.some((id) => task.tab_ids.includes(id)),
+    );
+    return overlap ? { ...task, notes: overlap.notes } : task;
+  });
 }
 
 export function App() {
@@ -55,23 +60,26 @@ export function App() {
   const [batches, setBatches] = useState<CloseBatch[]>([]);
   const [board, setBoard] = useState<Board>({ tasks: [], ignored: [] });
   const [snapshots, setSnapshots] = useState<TabSnapshot[]>([]);
-  const [scanning, setScanning] = useState(false);
-  const [lastRun, setLastRun] = useState<RunResponse | null>(null);
-  const [googleOk, setGoogleOk] = useState<{ connected: boolean; configured: boolean } | null>(null);
+  const [scanning, setScanning] = useState(true);
   const [hits, setHits] = useState<{ prompt: string; result: ChatResponse } | null>(null);
-  const [burst, setBurst] = useState(false);
+  const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const boardRef = useRef(board);
   const inferTimer = useRef(0);
   const pruneTimer = useRef(0);
+  const celebrateTimer = useRef(0);
+
+  const [closingId, setClosingId] = useState<string | null>(null);
+  const [farewell, setFarewell] = useState<OpenTask | null>(null);
+  const celebratingRef = useRef<string | null>(null);
+  const closingRef = useRef<string | null>(null);
+  celebratingRef.current = celebratingId;
+  closingRef.current = closingId;
 
   boardRef.current = board;
 
   useEffect(() => {
     void refreshUndo();
     void loadMemory().then(() => scan(true));
-    void googleAuthStatus()
-      .then(setGoogleOk)
-      .catch(() => setGoogleOk(null));
   }, []);
 
   useEffect(() => {
@@ -117,17 +125,47 @@ export function App() {
 
   async function refreshUndo() {
     const reply = await send<RestorePreviewReply>({ type: "RESTORE_PREVIEW" });
-    if (reply.ok) {
-      setBatches(reply.batches);
+    if (!reply.ok) {
+      return;
     }
+    const filed = await loadFiledNotes();
+    const used = new Set<string>();
+    setBatches(
+      reply.batches.map((batch) => {
+        if (batch.notes?.trim()) {
+          return batch;
+        }
+        const match = filed.find((row) => row.label === batch.label && !used.has(row.id));
+        if (!match) {
+          return batch;
+        }
+        used.add(match.id);
+        return { ...batch, notes: match.notes };
+      }),
+    );
   }
 
   async function commit(next: Board) {
+    boardRef.current = next;
     setBoard(next);
     await saveBoard(next);
   }
 
+  async function dismissTask(taskId: string) {
+    const current = boardRef.current;
+    if (!current.tasks.some((task) => task.task_id === taskId)) {
+      return;
+    }
+    await commit({
+      ...current,
+      tasks: current.tasks.filter((task) => task.task_id !== taskId),
+    });
+  }
+
   async function localPrune() {
+    if (celebratingRef.current || closingRef.current) {
+      return;
+    }
     const reply = await send<SnapshotReply>({ type: "SNAPSHOT" });
     if (!reply.ok) {
       return;
@@ -137,6 +175,9 @@ export function App() {
   }
 
   async function scan(full: boolean) {
+    if ((celebratingRef.current || closingRef.current) && !full) {
+      return;
+    }
     setScanning(true);
     try {
       const reply = await send<SnapshotReply>({ type: "SNAPSHOT" });
@@ -154,12 +195,15 @@ export function App() {
       }
       const inferred = await inferTasks(reply.tabs, {
         cutoffDays: cutoff,
-        existing: pruned.tasks.filter(
-          (task) => task.user_locked || task.kind === "protected",
-        ),
+        existing: full
+          ? pruned.tasks.filter(
+              (task) => task.user_locked || task.kind === "protected" || Boolean(task.notes?.trim()),
+            )
+          : pruned.tasks,
         ignoredUrls: pruned.ignored,
+        fast: !full,
       });
-      await commit({ tasks: inferred, ignored: pruned.ignored });
+      await commit({ tasks: carryNotes(inferred, pruned.tasks), ignored: pruned.ignored });
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -167,67 +211,88 @@ export function App() {
     }
   }
 
-  async function closeTabs(tabIds: number[], label: string): Promise<number> {
-    const reply = await send<CloseReply>({ type: "APPLY_CLOSE", tabIds, label });
+  function celebrate(taskId: string) {
+    setCelebratingId(taskId);
+    window.clearTimeout(celebrateTimer.current);
+    celebrateTimer.current = window.setTimeout(() => {
+      celebratingRef.current = null;
+      closingRef.current = null;
+      setCelebratingId(null);
+      setClosingId(null);
+      setFarewell(null);
+      setHits(null);
+      void localPrune();
+      void loadMemory();
+    }, 2100);
+  }
+
+  async function closeTabs(
+    tabIds: number[],
+    label: string,
+    notes = "",
+  ): Promise<{ closed: number; batchId: string | null }> {
+    const reply = await send<CloseReply>({ type: "APPLY_CLOSE", tabIds, label, notes });
     if (!reply.ok) {
       throw new Error(reply.error);
     }
     if (reply.closed > 0) {
       await refreshUndo();
     }
-    return reply.closed;
+    return { closed: reply.closed, batchId: reply.batch?.batch_id ?? null };
   }
 
   async function onDone(task: OpenTask) {
-    setBusy(true);
+    setClosingId(task.task_id);
+    celebrate(task.task_id);
     try {
-      const tabs = snapshots.filter((tab) => task.tab_ids.includes(tab.tab_id));
+      const latest = boardRef.current.tasks.find((row) => row.task_id === task.task_id) ?? task;
+      const note = (latest.notes ?? task.notes ?? "").trim();
+      const tabs = snapshots.filter((tab) => latest.tab_ids.includes(tab.tab_id));
       if (tabs.length === 0) {
         throw new Error("Those tabs are gone.");
       }
-      if (task.kind === "durable") {
-        const plan = await createPlan(task.label, tabs, { forceFile: true });
-        const run = await runPlan(
-          plan.plan_id,
-          tabs.map((tab) => ({ tab_id: tab.tab_id, checked: true })),
-        );
-        setLastRun(run);
-        if (!run.report.artifacts_ok) {
-          setNotice("Couldn’t save the work — tabs stay open.");
-          return;
-        }
-        const closeIds = run.apply.close_tab_ids.filter((id) => task.tab_ids.includes(id));
-        await closeTabs(closeIds.length ? closeIds : task.tab_ids, task.label);
-      } else {
-        await closeTabs(task.tab_ids, task.label);
+      await closeTabs(latest.tab_ids, latest.label, note);
+      setSnapshots((live) => live.filter((tab) => !latest.tab_ids.includes(tab.tab_id)));
+      setFarewell(latest);
+      await dismissTask(latest.task_id);
+      if (note) {
+        await saveFiledNote({ ...latest, notes: note });
       }
-      await observeMemory({
+      void observeMemory({
         kind: "stillopen_close",
-        host: task.hosts[0] ?? "",
-        title: task.label,
+        host: latest.hosts[0] ?? "",
+        title: latest.label,
         source: "task",
       });
-      setBurst(true);
-      window.setTimeout(() => setBurst(false), 900);
-      setNotice(`Closed “${task.label}”.`);
-      await scan(false);
-      await loadMemory();
+      setNotice(note ? `Closed “${latest.label}”. Note saved.` : `Closed “${latest.label}”.`);
     } catch (error) {
+      window.clearTimeout(celebrateTimer.current);
+      celebratingRef.current = null;
+      closingRef.current = null;
+      setCelebratingId(null);
+      setFarewell(null);
       setNotice(String(error));
     } finally {
-      setBusy(false);
+      setClosingId(null);
     }
   }
 
   async function onChatClose(tabIds: number[], label: string) {
     setBusy(true);
+    const hit = board.tasks.find((task) => tabIds.some((id) => task.tab_ids.includes(id)));
+    celebrate(hit?.task_id ?? "chat");
     try {
       await closeTabs(tabIds, label || "Ask");
-      setHits(null);
-      setBurst(true);
-      window.setTimeout(() => setBurst(false), 900);
-      await scan(false);
+      if (hit) {
+        setSnapshots((live) => live.filter((tab) => !tabIds.includes(tab.tab_id)));
+        setFarewell(hit);
+        await dismissTask(hit.task_id);
+      }
     } catch (error) {
+      window.clearTimeout(celebrateTimer.current);
+      celebratingRef.current = null;
+      setCelebratingId(null);
+      setFarewell(null);
       setNotice(String(error));
     } finally {
       setBusy(false);
@@ -281,6 +346,10 @@ export function App() {
   }
 
   const loose = looseTabs(snapshots, board);
+  const shownTasks =
+    farewell && !board.tasks.some((task) => task.task_id === farewell.task_id)
+      ? [farewell, ...board.tasks]
+      : board.tasks;
 
   return (
     <main>
@@ -319,11 +388,12 @@ export function App() {
       {view === "memory" ? (
         <MemoryView dump={memory} />
       ) : view === "undo" ? (
-        <UndoView batches={batches} lastRun={lastRun} busy={busy} onRestore={(id) => void onRestore(id)} />
+        <UndoView batches={batches} busy={busy} onRestore={(id) => void onRestore(id)} />
       ) : (
         <>
           <ChatBox
             busy={busy}
+            tasks={board.tasks}
             onApplied={(result, prompt) => {
               if (result.wants_close) {
                 setHits({ prompt, result });
@@ -334,20 +404,23 @@ export function App() {
           />
           {hits ? (
             <ChatHits
+              key={hits.prompt}
               label={hits.result.label || hits.prompt}
               matches={hits.result.matches}
               busy={busy}
+              celebrating={celebratingId === "chat"}
               onDismiss={() => setHits(null)}
               onClose={(ids) => void onChatClose(ids, hits.result.label || hits.prompt)}
             />
           ) : null}
           <Workbench
-            tasks={board.tasks}
+            tasks={shownTasks}
             live={snapshots}
             loose={loose}
             scanning={scanning}
             busy={busy}
-            burst={burst}
+            closingId={closingId}
+            celebratingId={celebratingId}
             onRefresh={() => void scan(true)}
             onDemo={() => void onDemo()}
             onNewTask={() => void commit({ ...board, tasks: [newTask(), ...board.tasks] })}
@@ -360,26 +433,19 @@ export function App() {
                 ),
               });
             }}
+            onNotes={(taskId, notes) => {
+              void commit({
+                ...board,
+                tasks: board.tasks.map((task) =>
+                  task.task_id === taskId ? { ...task, notes, user_locked: true } : task,
+                ),
+              });
+            }}
             onIgnore={(taskId, tabId) => void commit(ignoreTab(board, taskId, tabId, snapshots))}
             onMove={(tabId, fromId, toId) => void commit(moveTab(board, tabId, fromId, toId, snapshots))}
             onDropLoose={(tabId, toId) => void commit(dropLoose(board, tabId, toId, snapshots))}
           />
-          <p className="foot">
-            {googleOk?.connected
-              ? "Google connected."
-              : googleOk?.configured
-                ? "Connect Google to save durable tasks."
-                : "Closes are real."}{" "}
-            {googleOk?.configured && !googleOk.connected ? (
-              <button
-                type="button"
-                className="linkish"
-                onClick={() => void googleAuthUrl().then((url) => chrome.tabs.create({ url }))}
-              >
-                Connect
-              </button>
-            ) : null}
-          </p>
+          <p className="foot">Closes are real. Notes stay in Restore.</p>
         </>
       )}
     </main>

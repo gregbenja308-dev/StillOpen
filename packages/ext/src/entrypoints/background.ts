@@ -107,7 +107,11 @@ export default defineBackground(() => {
       return true;
     }
     if (message.type === "APPLY_CLOSE") {
-      applyClose(message.tabIds ?? [], typeof message.label === "string" ? message.label : "Closed")
+      applyClose(
+        message.tabIds ?? [],
+        typeof message.label === "string" ? message.label : "Closed",
+        typeof message.notes === "string" ? message.notes : "",
+      )
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
       return true;

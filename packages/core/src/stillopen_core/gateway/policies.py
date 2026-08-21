@@ -33,12 +33,14 @@ class GatewayPolicy:
 _DEFAULT: Final[dict[str, tuple[ToolPolicy, ...]]] = {
     "surveyor": (ToolPolicy("sanitize_snapshot", rate_limit_per_minute=60),),
     "framer": (ToolPolicy("match_named_job", rate_limit_per_minute=30),),
+    "cluster": (ToolPolicy("generate_json", rate_limit_per_minute=20),),
+    "chat": (ToolPolicy("generate_json", rate_limit_per_minute=30),),
+    "categorize": (ToolPolicy("generate_json", rate_limit_per_minute=20),),
     "clerk": (ToolPolicy("draft_artifact", rate_limit_per_minute=20),),
     "runner": (
         ToolPolicy("create_doc", rate_limit_per_minute=10),
         ToolPolicy("create_event", rate_limit_per_minute=10),
         ToolPolicy("create_task", rate_limit_per_minute=10),
-        ToolPolicy("send_mail", rate_limit_per_minute=5),
         ToolPolicy("emit_tab_apply", rate_limit_per_minute=20),
     ),
     "verifier": (

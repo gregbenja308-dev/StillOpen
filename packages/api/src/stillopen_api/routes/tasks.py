@@ -19,6 +19,7 @@ class InferTasksRequest(BaseModel):
     cutoff_days: int = Field(default=7, ge=1, le=90)
     existing: list[OpenTask] = Field(default_factory=list, max_length=80)
     ignored_urls: list[str] = Field(default_factory=list, max_length=200)
+    fast: bool = False
 
 
 class InferTasksResponse(BaseModel):
@@ -33,5 +34,6 @@ def infer_open_tasks(body: InferTasksRequest) -> InferTasksResponse:
             cutoff_days=body.cutoff_days,
             existing=body.existing or None,
             ignored_urls=body.ignored_urls or None,
+            fast=body.fast,
         )
     )

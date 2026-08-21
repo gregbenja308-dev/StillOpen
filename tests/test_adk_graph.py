@@ -16,6 +16,7 @@ def test_run_graph_clerk_has_no_execute_tools() -> None:
     assert RUN_GRAPH[0].tools == ()
     assert "create_doc" not in RUN_GRAPH[0].tools
     assert "create_doc" in RUN_GRAPH[1].tools
+    assert "send_mail" not in RUN_GRAPH[1].tools
     assert RUN_GRAPH[1].kind == "python"
     assert RUN_GRAPH[2].kind == "python"
     assert graph_names() == ["clerk", "runner", "verifier"]
@@ -36,10 +37,10 @@ def test_sequential_agent_has_python_runner_and_verifier() -> None:
 def test_clerk_prompt_excludes_blocked_hosts(seeded_tabs: list[TabSnapshot]) -> None:
     plan = propose_plan(user_id="local-dev", tabs=seeded_tabs, command="house")
     prompt = clerk_prompt(plan, sanitize_tabs(seeded_tabs))
-    assert "chase.com" not in prompt.lower() or "blocked" in prompt
     assert "chase.com" not in prompt
     assert "super-secret" not in prompt
     assert "123456789" not in prompt
+    assert "untrusted" in prompt.lower()
 
 
 def test_clerk_prompt_caps_at_twelve() -> None:

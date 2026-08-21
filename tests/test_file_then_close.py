@@ -48,3 +48,32 @@ def test_file_then_close_returns_artifact_url(seeded_tabs: list[TabSnapshot]) ->
     assert result.records
     assert result.records[0].url.startswith("https://example.invalid/")
     assert result.apply.close_tab_ids
+
+
+def test_clerk_rewrites_a_copied_tab_title(seeded_tabs: list[TabSnapshot]) -> None:
+    from stillopen_core.agents.clerk import rewrite_copied_titles
+    from stillopen_core.schemas.agent import ClerkOutput
+    from stillopen_core.schemas.artifact import ArtifactDraft, ArtifactKind
+
+    house = [t for t in seeded_tabs if t.tab_id in {11, 12}]
+    plan = propose_plan(
+        user_id="local-dev",
+        tabs=house,
+        command="house shopping",
+        force_file=True,
+    )
+    tab = house[0]
+    out = ClerkOutput(
+        drafts=[
+            ArtifactDraft(
+                kind=ArtifactKind.DOC,
+                title=tab.title,
+                body="notes",
+                source_urls=[tab.url],
+                card_id=plan.cards[0].card_id,
+            )
+        ]
+    )
+    scrubbed = rewrite_copied_titles(out, sanitize_tabs(house), plan)
+    assert scrubbed.drafts[0].title != tab.title
+    assert plan.cards[0].label in scrubbed.drafts[0].title

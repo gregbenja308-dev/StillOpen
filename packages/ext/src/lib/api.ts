@@ -2,16 +2,12 @@ import {
   chatResponseSchema,
   inferTasksResponseSchema,
   memoryDumpSchema,
-  planSchema,
-  runResponseSchema,
   scheduledCloseSchema,
   type ChatResponse,
   type MemoryDump,
   type MatchedTab,
   type ObserveKind,
   type OpenTask,
-  type Plan,
-  type RunResponse,
   type ScheduledClose,
   type TabSnapshot,
 } from "./schema";
@@ -52,68 +48,23 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json();
 }
 
-export async function createPlan(
-  command: string | null,
-  tabs: TabSnapshot[],
-  opts: { forceFile?: boolean } = {},
-): Promise<Plan> {
-  const [base, uid] = await Promise.all([apiBase(), userId()]);
-  const body = await readJson(
-    await fetch(`${base}/v1/plans`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: uid,
-        command,
-        tabs,
-        force_file: Boolean(opts.forceFile),
-      }),
-    }),
-  );
-  return planSchema.parse(body);
-}
-
-export async function googleAuthUrl(): Promise<string> {
-  const [base, uid] = await Promise.all([apiBase(), userId()]);
-  return `${base}/v1/auth/google?user_id=${encodeURIComponent(uid)}`;
-}
-
-export async function googleAuthStatus(): Promise<{ connected: boolean; configured: boolean }> {
-  const [base, uid] = await Promise.all([apiBase(), userId()]);
-  const body = (await readJson(
-    await fetch(`${base}/v1/auth/google/status?user_id=${encodeURIComponent(uid)}`),
-  )) as { connected?: string; configured?: string };
-  return { connected: body.connected === "yes", configured: body.configured === "yes" };
-}
-
-export async function runPlan(
-  planId: string,
-  overrides: Array<{ tab_id: number; checked: boolean }>,
-): Promise<RunResponse> {
-  const base = await apiBase();
-  const body = await readJson(
-    await fetch(`${base}/v1/plans/${planId}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ overrides }),
-    }),
-  );
-  return runResponseSchema.parse(body);
-}
-
 export async function getMemory(): Promise<MemoryDump> {
   const [base, uid] = await Promise.all([apiBase(), userId()]);
   const body = await readJson(await fetch(`${base}/v1/memory?user_id=${encodeURIComponent(uid)}`));
   return memoryDumpSchema.parse(body);
 }
 
-export async function chatMemory(message: string, tabs: TabSnapshot[] = []): Promise<ChatResponse> {
+export async function chatMemory(
+  message: string,
+  tabs: TabSnapshot[] = [],
+  tasks: OpenTask[] = [],
+): Promise<ChatResponse> {
   const [base, uid] = await Promise.all([apiBase(), userId()]);
   const body = await readJson(
     await fetch(`${base}/v1/memory/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: uid, message, tabs }),
+      body: JSON.stringify({ user_id: uid, message, tabs, tasks }),
     }),
   );
   return chatResponseSchema.parse(body);
@@ -168,7 +119,12 @@ export async function scheduleClose(input: {
 
 export async function inferTasks(
   tabs: TabSnapshot[],
-  opts: { cutoffDays?: number; existing?: OpenTask[]; ignoredUrls?: string[] } = {},
+  opts: {
+    cutoffDays?: number;
+    existing?: OpenTask[];
+    ignoredUrls?: string[];
+    fast?: boolean;
+  } = {},
 ): Promise<OpenTask[]> {
   if (tabs.length === 0) {
     return [];
@@ -184,6 +140,7 @@ export async function inferTasks(
         cutoff_days: opts.cutoffDays ?? 7,
         existing: opts.existing ?? [],
         ignored_urls: opts.ignoredUrls ?? [],
+        fast: Boolean(opts.fast),
       }),
     }),
   );

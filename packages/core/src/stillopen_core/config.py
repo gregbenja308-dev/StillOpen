@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     gcp_project: str = Field(default="", alias="GOOGLE_CLOUD_PROJECT")
     gcp_region: str = Field(default="us-central1", alias="GOOGLE_CLOUD_REGION")
+    # Gemini 3.5 on Vertex is global / multi-region, not us-central1.
+    gcp_location: str = Field(default="global", alias="GOOGLE_CLOUD_LOCATION")
+    use_vertex: bool = Field(default=False, alias="GOOGLE_GENAI_USE_VERTEXAI")
 
     google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
     fast_model: str = Field(default="gemini-3.5-flash", alias="STILLOPEN_FAST_MODEL")
@@ -41,21 +44,19 @@ class Settings(BaseSettings):
     token_key: str = Field(
         default="",
         alias="STILLOPEN_TOKEN_KEY",
-        description="Fernet key. Empty means refuse to persist OAuth tokens.",
+        description="Fernet key for encrypted secrets at rest.",
     )
 
-    oauth_client_id: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_ID")
-    oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
-    oauth_redirect_uri: str = Field(
-        default="http://127.0.0.1:8080/v1/auth/google/callback",
-        alias="GOOGLE_OAUTH_REDIRECT_URI",
-    )
-    use_live_google: bool = Field(default=False, alias="STILLOPEN_LIVE_GOOGLE")
     job_token: str = Field(default="", alias="STILLOPEN_JOB_TOKEN")
     firestore_database: str = Field(default="(default)", alias="STILLOPEN_FIRESTORE_DB")
 
     otel_exporter: OtelExporter = Field(
-        default=OtelExporter.CONSOLE, alias="STILLOPEN_OTEL_EXPORTER"
+        default=OtelExporter.NONE, alias="STILLOPEN_OTEL_EXPORTER"
+    )
+    model_armor_template: str = Field(
+        default="",
+        alias="STILLOPEN_MODEL_ARMOR_TEMPLATE",
+        description="Model Armor template id. Empty = inline guards only.",
     )
     cors_origin_regex: str = Field(
         default=r"chrome-extension://.*",
@@ -67,16 +68,14 @@ class Settings(BaseSettings):
         return self.env is Environment.LOCAL
 
     @property
-    def can_persist_tokens(self) -> bool:
-        return bool(self.token_key)
-
-    @property
     def has_gemini(self) -> bool:
-        return bool(self.google_api_key)
+        return bool(self.google_api_key) or (self.use_vertex and bool(self.gcp_project))
 
     @property
-    def has_oauth(self) -> bool:
-        return bool(self.oauth_client_id and self.oauth_client_secret)
+    def armor_backend(self) -> str:
+        if self.model_armor_template and self.gcp_project:
+            return "model_armor"
+        return "inline"
 
     @property
     def use_firestore(self) -> bool:

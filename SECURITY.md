@@ -1,6 +1,6 @@
 # Security — why this extension is allowed to see tabs
 
-Still Open reads tab **metadata** so it can file unfinished work into Google. That is enough to leak a life if we are sloppy. These rules are code, not vibes. Judges: this is the tab trust model.
+Still Open reads tab **metadata** so it can name unfinished jobs and close that pile. That is enough to leak a life if we are sloppy. These rules are code, not vibes. Judges: this is the tab trust model.
 
 ```
 Chrome tab metadata
@@ -8,9 +8,7 @@ Chrome tab metadata
         └─► Surveyor redact ──► API / Firestore
                     │
                     ├─ deny-listed host ──► blocked_from_model (never Gemini)
-                    └─ other hosts ──► Clerk sees title + host + redacted URL
-                              │
-                              └─► Drive file + Calendar events only
+                    └─ other hosts ──► cluster sees title + host + redacted URL
 ```
 
 ## What we read (default)
@@ -46,11 +44,7 @@ Never `<all_urls>` at install. Page bodies are not read for the demo.
 
 ## Close is a privilege
 
-File failed → no close. User uncheck / Undo / skip teaches keep. Scheduled close only URLs the user selected. Watch stores **hashes**, never HTML.
-
-## OAuth (throwaway account)
-
-Scopes: `drive.file`, `calendar.events`. No Gmail read. No full Drive. Tokens persist only if `STILLOPEN_TOKEN_KEY` is a Fernet key; empty key → refuse. Secret Manager in cloud. Refresh tokens never live in the extension.
+User uncheck / Undo / skip teaches keep. Scheduled close only URLs the user selected. Watch stores **hashes**, never HTML.
 
 ## Data we will not handle
 

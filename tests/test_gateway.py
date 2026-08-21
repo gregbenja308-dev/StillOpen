@@ -2,6 +2,7 @@ import pytest
 from stillopen_core.agents.conductor import propose_plan
 from stillopen_core.agents.run_conductor import run_plan
 from stillopen_core.errors import ToolNotPermitted
+from stillopen_core.gateway.gemini import generate_json
 from stillopen_core.gateway.policies import GatewayPolicy, ToolPolicy
 from stillopen_core.gateway.router import AgentGateway
 from stillopen_core.schemas.plan import PlanStatus
@@ -32,6 +33,29 @@ async def test_runner_can_create_doc() -> None:
     gw = AgentGateway()
     gw.register("create_doc", _ok)
     assert await gw.invoke(agent_name="runner", tool_name="create_doc") == "ok"
+
+
+def test_runner_cannot_send_mail() -> None:
+    gw = AgentGateway()
+    with pytest.raises(ToolNotPermitted):
+        gw.invoke_sync(agent_name="runner", tool_name="send_mail", fn=lambda: "nope")
+
+
+def test_cluster_and_chat_may_generate_json_not_docs() -> None:
+    gw = AgentGateway()
+    payload = {"ok": True}
+    cluster = gw.invoke_sync(agent_name="cluster", tool_name="generate_json", fn=lambda: payload)
+    chat = gw.invoke_sync(agent_name="chat", tool_name="generate_json", fn=lambda: payload)
+    assert cluster == {"ok": True}
+    assert chat == {"ok": True}
+    with pytest.raises(ToolNotPermitted):
+        gw.invoke_sync(agent_name="cluster", tool_name="create_doc", fn=lambda: "nope")
+    with pytest.raises(ToolNotPermitted):
+        gw.invoke_sync(agent_name="chat", tool_name="create_doc", fn=lambda: "nope")
+
+
+def test_generate_json_is_silent_in_pytest() -> None:
+    assert generate_json(agent_name="cluster", prompt='{"tasks":[]}') is None
 
 
 def test_run_plan_gateway_denies_runner_create_doc(seeded_tabs: list[TabSnapshot]) -> None:

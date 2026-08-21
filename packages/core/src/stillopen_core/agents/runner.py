@@ -13,7 +13,6 @@ _CREATE_TOOL = {
     ArtifactKind.DOC: "create_doc",
     ArtifactKind.EVENT: "create_event",
     ArtifactKind.TASK: "create_task",
-    ArtifactKind.MAIL: "send_mail",
 }
 
 

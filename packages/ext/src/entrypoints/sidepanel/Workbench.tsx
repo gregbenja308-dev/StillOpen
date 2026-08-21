@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import type { OpenTask, TabSnapshot } from "@/lib/schema";
 import { hostOf } from "@/lib/stale";
@@ -9,12 +9,14 @@ export function Workbench({
   loose,
   scanning,
   busy,
-  burst,
+  closingId,
+  celebratingId,
   onRefresh,
   onDemo,
   onNewTask,
   onDone,
   onRename,
+  onNotes,
   onIgnore,
   onMove,
   onDropLoose,
@@ -24,22 +26,24 @@ export function Workbench({
   loose: TabSnapshot[];
   scanning: boolean;
   busy: boolean;
-  burst: boolean;
+  closingId: string | null;
+  celebratingId: string | null;
   onRefresh: () => void;
   onDemo: () => void;
   onNewTask: () => void;
   onDone: (task: OpenTask) => void;
   onRename: (taskId: string, label: string) => void;
+  onNotes: (taskId: string, notes: string) => void;
   onIgnore: (taskId: string, tabId: number) => void;
   onMove: (tabId: number, fromId: string, toId: string) => void;
   onDropLoose: (tabId: number, toId: string) => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const noteDrafts = useRef<Record<string, string>>({});
   const byId = new Map(live.map((tab) => [tab.tab_id, tab]));
 
   return (
     <>
-      {burst ? <Confetti /> : null}
       <header>
         <div className="panel-head">
           <div>
@@ -57,7 +61,12 @@ export function Workbench({
         </div>
       </header>
 
-      {tasks.length === 0 && !scanning ? (
+      {scanning && tasks.length === 0 ? (
+        <section className="panel scanning" aria-live="polite" aria-busy="true">
+          <span className="spinner" aria-hidden />
+          <p className="scanning-copy">Looking for unfinished tasks in this window</p>
+        </section>
+      ) : tasks.length === 0 ? (
         <section className="panel">
           <p className="hint">No open tasks in this window.</p>
         </section>
@@ -65,13 +74,14 @@ export function Workbench({
         <ul className="task-list">
           {tasks.map((task) => {
             const expanded = openId === task.task_id;
+            const closing = closingId === task.task_id || celebratingId === task.task_id;
             const members = task.tab_ids
               .map((id) => byId.get(id))
               .filter((tab): tab is TabSnapshot => Boolean(tab));
             return (
               <li
                 key={task.task_id}
-                className={`task-card ${task.kind}${expanded ? " open" : ""}`}
+                className={`task-card ${task.kind}${expanded ? " open" : ""}${closing ? " closing" : ""}`}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault();
@@ -91,6 +101,7 @@ export function Workbench({
                   }
                 }}
               >
+                {celebratingId === task.task_id ? <Confetti /> : null}
                 <div className="task-top">
                   <button
                     type="button"
@@ -120,6 +131,7 @@ export function Workbench({
                   >
                     {task.hosts.slice(0, 3).join(" · ")}
                     {task.hosts.length > 3 ? "…" : ""}
+                    {task.notes?.trim() ? ` · ${task.notes.trim().slice(0, 48)}` : ""}
                   </button>
                 ) : (
                   <ul className="members">
@@ -161,15 +173,37 @@ export function Workbench({
                     ))}
                   </ul>
                 )}
+                {expanded && task.kind !== "protected" && !closing ? (
+                  <TaskNotes
+                    notes={task.notes ?? ""}
+                    onSave={(notes) => {
+                      noteDrafts.current[task.task_id] = notes;
+                      onNotes(task.task_id, notes);
+                    }}
+                  />
+                ) : null}
                 {task.kind === "protected" ? (
-                  <p className="hint">Stays. Never sent to a model.</p>
+                  <p className="protect-why">
+                    Bank, health, government, and login tabs stay on this laptop.
+                    They are never sent to a model.
+                  </p>
+                ) : closing ? (
+                  <div className="closing-banner" aria-live="polite" aria-busy="true">
+                    <span className="spinner" aria-hidden />
+                    <p className="scanning-copy">Closing these tabs…</p>
+                  </div>
                 ) : (
                   <div className="actions">
                     <button
                       type="button"
                       className="primary"
-                      disabled={busy || task.tab_ids.length === 0}
-                      onClick={() => onDone(task)}
+                      disabled={Boolean(closingId) || task.tab_ids.length === 0}
+                      onClick={() =>
+                        onDone({
+                          ...task,
+                          notes: noteDrafts.current[task.task_id] ?? task.notes ?? "",
+                        })
+                      }
                     >
                       Done, close!
                     </button>
@@ -278,23 +312,60 @@ function TaskTitle({
   );
 }
 
-function Confetti() {
-  const colors = ["#1f4b3a", "#c4a35a", "#d45b3a", "#6b8f71", "#f4e3b2", "#2e7d5b"];
+function TaskNotes({ notes, onSave }: { notes: string; onSave: (notes: string) => void }) {
+  const [draft, setDraft] = useState(notes);
+
+  useEffect(() => {
+    setDraft(notes);
+  }, [notes]);
+
+  return (
+    <label className="task-notes">
+      <span className="kicker">Notes</span>
+      <textarea
+        value={draft}
+        maxLength={4000}
+        rows={3}
+        placeholder="What should survive when these tabs close?"
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          onSave(next);
+        }}
+        onBlur={() => {
+          if (draft !== notes) {
+            onSave(draft);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
+export function Confetti() {
+  const colors = ["#1f4b3a", "#c4a35a", "#d45b3a", "#6b8f71", "#f4e3b2"];
   return (
     <div className="confetti" aria-hidden>
-      {Array.from({ length: 42 }, (_, i) => (
-        <span
-          key={i}
-          style={{
-            left: `${(i * 2.35) % 100}%`,
-            width: `${8 + (i % 6)}px`,
-            height: `${12 + (i % 5)}px`,
-            background: colors[i % colors.length],
-            animationDelay: `${i * 28}ms`,
-            animationDuration: `${1.2 + (i % 5) * 0.15}s`,
-          }}
-        />
-      ))}
+      {Array.from({ length: 22 }, (_, i) => {
+        const angle = (i / 22) * Math.PI * 2 + (i % 4) * 0.12;
+        const dist = 44 + (i % 6) * 10;
+        return (
+          <i
+            key={i}
+            className={i % 3 === 0 ? "tick" : "dot"}
+            style={
+              {
+                "--x": `${Math.round(Math.cos(angle) * dist)}px`,
+                "--y": `${Math.round(Math.sin(angle) * dist * 0.78 - 8)}px`,
+                "--r": `${(i * 28) % 140 - 70}deg`,
+                "--s": `${7 + (i % 4)}px`,
+                "--d": `${(i % 6) * 40}ms`,
+                background: colors[i % colors.length],
+              } as CSSProperties
+            }
+          />
+        );
+      })}
     </div>
   );
 }

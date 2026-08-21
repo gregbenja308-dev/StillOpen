@@ -15,7 +15,10 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "seeded_window.json
 
 
 @pytest.fixture(autouse=True)
-def _reset() -> None:
+def _reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Local .env may enable Vertex; tests stay keyless unless they opt in.
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "false")
+    monkeypatch.setenv("STILLOPEN_OTEL_EXPORTER", "none")
     get_settings.cache_clear()
     reset_bank()
     reset_gateway()

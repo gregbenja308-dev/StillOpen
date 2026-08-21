@@ -89,6 +89,7 @@ export const closeBatchSchema = z.object({
   label: z.string(),
   closed_at: z.number(),
   rows: z.array(undoRowSchema),
+  notes: z.string().default(""),
 });
 
 export type CloseBatch = z.infer<typeof closeBatchSchema>;
@@ -186,6 +187,7 @@ export const openTaskSchema = z.object({
   quiet: z.boolean().default(false),
   intention: z.string().default("unknown"),
   user_locked: z.boolean().default(false),
+  notes: z.string().default(""),
 });
 
 export const inferTasksResponseSchema = z.object({

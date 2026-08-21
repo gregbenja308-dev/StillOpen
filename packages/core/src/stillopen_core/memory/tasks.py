@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import time
 from collections import defaultdict
 from urllib.parse import parse_qs, unquote_plus, urlsplit
 
-import httpx
-
 from stillopen_core.agents.framer import frame
-from stillopen_core.config import get_settings
+from stillopen_core.gateway.gemini import TITLE_IS_DATA, generate_json
 from stillopen_core.observability.logger import get_logger
 from stillopen_core.schemas.tab import HostClass, Intention, SanitizedTab, TabSnapshot
 from stillopen_core.schemas.task import OpenTask, TaskKind
+from stillopen_core.security.armor import looks_like_injection
 from stillopen_core.surveyor.sanitize import sanitize_tabs
 
 _logger = get_logger(__name__)
@@ -43,10 +40,24 @@ _WEAK_TOKENS = frozenset(
         "section",
     }
 )
-_LOOKUP_HINTS = ("wiki", "dictionary", "define", "meaning", "thesaurus", "wiktionary")
 _SEARCH_QUERY_KEYS = ("q", "query", "search_query", "k", "st", "p", "text", "wd")
 _MAX_CLUSTER_TOKEN = 24
 _MAX_NAME_TOKEN = 16
+_VAGUE_LABEL_WORDS = frozenset(
+    {
+        "sophisticated",
+        "important",
+        "complex",
+        "serious",
+        "misc",
+        "miscellaneous",
+        "various",
+        "general",
+        "random",
+        "stuff",
+        "things",
+    }
+)
 
 
 def infer_tasks(
@@ -56,6 +67,7 @@ def infer_tasks(
     now_ms: int | None = None,
     existing: list[OpenTask] | None = None,
     ignored_urls: list[str] | None = None,
+    fast: bool = False,
 ) -> list[OpenTask]:
     sanitized = sanitize_tabs(tabs)
     now = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -64,7 +76,7 @@ def infer_tasks(
     visible = [t for t in sanitized if _canon(t.url) not in ignored]
 
     if existing:
-        tasks = _reconcile(visible, existing, now=now, quiet_ms=quiet_ms)
+        tasks = _reconcile(visible, existing, now=now, quiet_ms=quiet_ms, fast=fast)
         tasks.sort(key=_sort_key)
         _logger.info("tasks.reconciled", count=len(tasks), existing=len(existing))
         return tasks
@@ -209,6 +221,12 @@ def _tab_tokens(tab: SanitizedTab) -> set[str]:
     return {t for t in (raw | {_fold(t) for t in raw}) if not _is_noise_token(t)}
 
 
+def _cluster_tokens(tab: SanitizedTab) -> set[str]:
+    """Overlap for grouping. Hostnames do not count — site kind is not a task."""
+    brands = _brand_tokens(tab)
+    return {t for t in _tab_tokens(tab) if t not in brands and _fold(t) not in brands}
+
+
 def _compound_parts(token: str, known: set[str]) -> set[str]:
     """austinapartments → austin + apartments; not homes ⊂ realestateandhomes."""
     extra: set[str] = set()
@@ -238,8 +256,12 @@ def _expand_contained(tokens_by_id: dict[int, set[str]]) -> dict[int, set[str]]:
 
 
 def _brand_tokens(tab: SanitizedTab) -> set[str]:
-    host = tab.host.removeprefix("www.").lower().replace(".", " ")
-    return {t for t in re.findall(r"[a-z0-9]+", host) if len(t) > 2}
+    """Registrable site name only (example.co.uk → example). Subdomains stay content."""
+    host = tab.host.removeprefix("www.").lower()
+    parts = [p for p in host.split(".") if p]
+    if len(parts) >= 2:
+        return {parts[-2], parts[-1]}
+    return {p for p in parts if len(p) > 2}
 
 
 def _content_tokens(tab: SanitizedTab) -> set[str]:
@@ -252,17 +274,43 @@ def _content_tokens(tab: SanitizedTab) -> set[str]:
 
 
 def _fallback_groups(tabs: list[SanitizedTab]) -> list[list[SanitizedTab]]:
-    groups = _split_by_tokens(tabs)
-    news: list[SanitizedTab] = []
-    rest: list[list[SanitizedTab]] = []
-    for group in groups:
-        if group and all(t.host_class is HostClass.NEWS for t in group):
-            news.extend(group)
-        else:
-            rest.append(group)
-    if news:
-        rest.append(news)
-    return rest
+    return _split_by_tokens(tabs)
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _fragment_of_slug(tok: str, slug: str) -> bool:
+    """Hyphen suffix of a longer slug ('python' in 'adk-python') is not the job."""
+    if not slug:
+        return False
+    parts = [p for p in re.split(r"[-_/]+", slug.lower()) if p]
+    t = tok.lower()
+    if len(parts) < 2 or t == _compact(slug):
+        return False
+    if _fold(_compact(slug)) == t or _fold(_compact(slug)) == _fold(t):
+        return False
+    return t == parts[-1] and t != parts[0] and len(parts[0]) >= 3
+
+
+def _same_job_overlap(
+    left: set[str],
+    right: set[str],
+    left_slug: str,
+    right_slug: str,
+) -> bool:
+    if left_slug and right_slug and left_slug.lower() == right_slug.lower():
+        return True
+    shared = left & right
+    if not shared:
+        return False
+    shared = {
+        tok
+        for tok in shared
+        if not _fragment_of_slug(tok, left_slug) and not _fragment_of_slug(tok, right_slug)
+    }
+    return bool(shared)
 
 
 def _split_by_tokens(tabs: list[SanitizedTab]) -> list[list[SanitizedTab]]:
@@ -281,12 +329,18 @@ def _split_by_tokens(tabs: list[SanitizedTab]) -> list[list[SanitizedTab]]:
         if root_l != root_r:
             parent[root_r] = root_l
 
-    tokens = _expand_contained({t.tab_id: _tab_tokens(t) for t in tabs})
+    tokens = _expand_contained({t.tab_id: _cluster_tokens(t) for t in tabs})
+    slugs = {t.tab_id: _path_topic(t) for t in tabs}
     for left in tabs:
         for right in tabs:
             if left.tab_id >= right.tab_id:
                 continue
-            if tokens[left.tab_id] & tokens[right.tab_id]:
+            if _same_job_overlap(
+                tokens[left.tab_id],
+                tokens[right.tab_id],
+                slugs[left.tab_id],
+                slugs[right.tab_id],
+            ):
                 union(left.tab_id, right.tab_id)
     groups: dict[int, list[SanitizedTab]] = defaultdict(list)
     for tab in tabs:
@@ -357,6 +411,7 @@ def _attach_to_tasks(
                 intention=parent.intention,
                 task_id=parent.task_id,
                 user_locked=parent.user_locked,
+                notes=parent.notes,
             )
         else:
             still.append(tab)
@@ -369,6 +424,7 @@ def _reconcile(
     *,
     now: int,
     quiet_ms: int,
+    fast: bool = False,
 ) -> list[OpenTask]:
     """Keep user tasks; drop closed tabs; attach or cluster leftovers."""
     by_id = {t.tab_id: t for t in live}
@@ -407,6 +463,7 @@ def _reconcile(
                     intention=task.intention,
                     task_id=task.task_id,
                     user_locked=task.user_locked,
+                    notes=task.notes,
                 )
             )
         else:
@@ -442,11 +499,16 @@ def _reconcile(
                 intention=parent.intention,
                 task_id=parent.task_id,
                 user_locked=parent.user_locked,
+                notes=parent.notes,
             )
         else:
             still.append(tab)
 
-    kept.extend(_cluster(still, now=now, quiet_ms=quiet_ms))
+    kept.extend(
+        _fallback_tasks(still, now=now, quiet_ms=quiet_ms)
+        if fast
+        else _cluster(still, now=now, quiet_ms=quiet_ms)
+    )
 
     protected = [t for t in live if t.blocked_from_model]
     if protected:
@@ -460,6 +522,7 @@ def _reconcile(
                 kind=TaskKind.PROTECTED,
                 task_id=prev.task_id if prev else None,
                 user_locked=bool(prev and prev.user_locked),
+                notes=prev.notes if prev else "",
             )
         )
     return kept
@@ -475,6 +538,7 @@ def _from_members(
     intention: Intention | None = None,
     task_id: str | None = None,
     user_locked: bool = False,
+    notes: str = "",
 ) -> OpenTask:
     intention = intention or (_guess_intention(members) if members else Intention.UNKNOWN)
     if kind is None:
@@ -501,6 +565,7 @@ def _from_members(
         "quiet": quiet,
         "intention": intention,
         "user_locked": user_locked,
+        "notes": notes[:4000],
     }
     if task_id:
         payload["task_id"] = task_id
@@ -516,22 +581,76 @@ def _guess_intention(members: list[SanitizedTab]) -> Intention:
     return cards[0].intention if cards else Intention.UNKNOWN
 
 
+def _path_topic(tab: SanitizedTab) -> str:
+    """Last meaningful path slug. Same rule on every host — not a site list."""
+    segs = [unquote_plus(s) for s in urlsplit(tab.url).path.split("/") if s]
+    useful: list[str] = []
+    for seg in segs:
+        compact = re.sub(r"[^a-z0-9]+", "", seg.lower())
+        if len(compact) < 4 or _is_noise_token(compact, naming=True):
+            continue
+        useful.append(seg)
+    return useful[-1] if useful else ""
+
+
+def _display_topic(raw: str) -> str:
+    return re.sub(r"[-_/]+", " ", raw).strip().title()
+
+
+def _shared_path_topic(members: list[SanitizedTab]) -> str:
+    slugs = [_path_topic(m) for m in members]
+    slugs = [s for s in slugs if s]
+    if not slugs:
+        return ""
+    folded = {s.lower() for s in slugs}
+    if len(folded) == 1:
+        return slugs[0]
+    return ""
+
+
+def _looks_like_lookup(members: list[SanitizedTab]) -> bool:
+    blob = " ".join(_url_text(t) for t in members).lower()
+    return any(
+        word in blob
+        for word in (
+            "define",
+            "definition",
+            "meaning",
+            "dictionary",
+            "thesaurus",
+            "wiki",
+            "lookup",
+            "what does",
+        )
+    )
+
+
+def _is_generic_work_label(label: str) -> bool:
+    return bool(re.match(r"^(finish|do|complete)\b.+\bwork$", _norm_label(label)))
+
+
 def _goal_label(members: list[SanitizedTab]) -> str:
     """A todo the user could mark done — never the page title or site name."""
-    topic = _shared_name(members) or (_topic_from_one(members[0]) if members else "")
-    blob = " ".join(_url_text(t) for t in members).lower()
-    if any(hint in blob for hint in _LOOKUP_HINTS):
-        return f"Definition for {topic}" if topic else "Look this up"
+    raw = (
+        _shared_path_topic(members)
+        or _shared_name(members)
+        or (_path_topic(members[0]) if members else "")
+        or (_topic_from_one(members[0]) if members else "")
+    )
+    topic = _display_topic(raw) if raw else ""
     if all(t.host_class is HostClass.NEWS for t in members):
         return "Reading today's news"
-    if "track" in blob:
-        return "Track this shipment"
     if any(t.host_class is HostClass.LISTING for t in members):
         return f"Compare {topic} options" if topic else "Compare these options"
-    if any(t.host_class is HostClass.SEARCH for t in members):
+    if _looks_like_lookup(members) or any(t.host_class is HostClass.SEARCH for t in members):
         return f"Look up {topic}" if topic else "Look this up"
     if topic:
-        return f"Finish this {topic} work"
+        intention = _guess_intention(members)
+        if intention is Intention.WAITING:
+            return f"Check {topic}"
+        if intention is Intention.COMPARING:
+            return f"Compare {topic} options"
+        return f"Read {topic}"
     fallback = _short(members[0].title, members[0].host) if members else ""
     return fallback if fallback and not _label_has_noise(fallback) else "Unfinished task"
 
@@ -590,9 +709,41 @@ def _copies_tab_title(label: str, members: list[SanitizedTab]) -> bool:
     return False
 
 
+def _is_vague_label(label: str) -> bool:
+    toks = set(re.findall(r"[a-z]+", label.lower()))
+    if toks & _VAGUE_LABEL_WORDS:
+        return True
+    content = toks - {
+        "the",
+        "this",
+        "that",
+        "some",
+        "a",
+        "an",
+        "do",
+        "finish",
+        "my",
+        "work",
+        "task",
+        "job",
+        "on",
+        "for",
+        "to",
+        "and",
+    }
+    return len(content) < 1
+
+
 def _task_label(label: str, members: list[SanitizedTab]) -> str:
     cleaned = label.strip()
-    if cleaned and not _copies_tab_title(cleaned, members) and not _label_has_noise(cleaned):
+    if (
+        cleaned
+        and not looks_like_injection(cleaned)
+        and not _copies_tab_title(cleaned, members)
+        and not _label_has_noise(cleaned)
+        and not _is_vague_label(cleaned)
+        and not _is_generic_work_label(cleaned)
+    ):
         return cleaned[:48]
     return _goal_label(members)[:48]
 
@@ -612,28 +763,33 @@ def _sort_key(task: OpenTask) -> tuple[int, int, str]:
 
 
 def _cluster_prompt(tabs: list[SanitizedTab]) -> str:
-    lines = [f"{t.tab_id}\t{t.url[:160]}\t{(t.title or t.host)[:80]}" for t in tabs[:80]]
+    lines = []
+    for t in tabs[:80]:
+        path = urlsplit(t.url).path[:80]
+        title = _data(t.title or t.host)
+        lines.append(f"tab_id={t.tab_id} host={t.host} path={path!r} title={title}")
     return (
+        f"{TITLE_IS_DATA}\n"
         "Group these open browser tabs into unfinished TASKS.\n"
         "A task is something the person meant to finish, written like a todo.\n"
         "The label is the job, never the tab title, never the site name.\n"
+        "You know what common sites are; use the URL path and title. "
+        "Do not invent vibe labels like 'sophisticated work'.\n"
         "\n"
-        "WRONG labels (these are tabs/topics): 'Ephemeral', 'BBC News', "
-        "'Ephemerality - Wikipedia', 'MacBook Air', 'Google'.\n"
-        "RIGHT labels (these are tasks): 'Definition for ephemeral', "
-        "'Reading today's news', 'Compare MacBook Air prices', "
-        "'Track this UPS package'.\n"
+        "WRONG labels: 'Ephemeral', 'BBC News', 'Finish this ephemeral work', "
+        "'sophisticated work'.\n"
+        "RIGHT labels: 'Look up ephemeral', 'Reading today's news', "
+        "'Compare MacBook Air prices'. Lookups say Look up / Definition, "
+        "not Finish this work.\n"
         "\n"
         "Grouping:\n"
-        "- Dictionary + Wikipedia + a Google search about the same word are "
-        "ONE task, including inflected forms (ephemeral / ephemerality).\n"
-        "- Homepage/section news tabs are ONE 'Reading today's news' task "
-        "unless they are clearly different stories.\n"
+        "- Same unfinished job → one task, even on different sites.\n"
+        "- Same category or language is not a job. Split those.\n"
+        "- Inflected forms of the same word are one job "
+        "(ephemeral / ephemerality).\n"
+        "- A related search belongs with the job it started.\n"
         "- Different jobs stay split even on similar sites "
         "(rentals vs laptop shopping).\n"
-        "- A related search belongs with the job it started.\n"
-        "- A forum, subreddit, or Q&A thread about the same job stays in "
-        "that task (r/AustinApartments belongs with Austin rentals).\n"
         "\n"
         "Rules:\n"
         "- Use only listed tab_id values; each exactly once.\n"
@@ -671,33 +827,12 @@ def _gemini_tasks(tabs: list[SanitizedTab], *, now: int, quiet_ms: int) -> list[
     return out or None
 
 
+def _data(text: str) -> str:
+    return repr((text or "")[:80])
+
+
 def _ask_gemini(prompt: str) -> dict | None:
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return None
-    settings = get_settings()
-    if not settings.has_gemini:
-        return None
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{settings.fast_model}:generateContent"
-    )
-    try:
-        response = httpx.post(
-            url,
-            params={"key": settings.google_api_key},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json"},
-            },
-            timeout=20.0,
-        )
-        response.raise_for_status()
-        text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-        raw = json.loads(text)
-    except Exception as exc:
-        _logger.warning("tasks.gemini_failed", error=str(exc)[:200])
-        return None
-    return raw if isinstance(raw, dict) else None
+    return generate_json(agent_name="cluster", prompt=prompt, timeout=8.0)
 
 
 __all__ = ["infer_tasks"]

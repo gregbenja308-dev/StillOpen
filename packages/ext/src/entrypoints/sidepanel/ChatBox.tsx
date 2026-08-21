@@ -3,13 +3,15 @@ import { FormEvent, useState } from "react";
 import { chatMemory } from "@/lib/api";
 import type { SnapshotReply } from "@/lib/messaging";
 import { send } from "@/lib/messaging";
-import type { ChatResponse } from "@/lib/schema";
+import type { ChatResponse, OpenTask } from "@/lib/schema";
 
 export function ChatBox({
   busy: parentBusy,
+  tasks,
   onApplied,
 }: {
   busy?: boolean;
+  tasks: OpenTask[];
   onApplied: (result: ChatResponse, message: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -29,7 +31,7 @@ export function ChatBox({
     try {
       const snap = await send<SnapshotReply>({ type: "SNAPSHOT" });
       const tabs = snap.ok ? snap.tabs : [];
-      const result = await chatMemory(message, tabs);
+      const result = await chatMemory(message, tabs, tasks);
       setText("");
       setReply(result.reply);
       onApplied(result, message);

@@ -11,11 +11,12 @@ from dataclasses import dataclass
 from stillopen_core.agents.adk_clerk import draft_or_degrade
 from stillopen_core.agents.runner import execute
 from stillopen_core.agents.verifier import safe_apply, verify
-from stillopen_core.errors import GatewayError, InvalidAgentOutput
+from stillopen_core.errors import ConfigError, GatewayError, InvalidAgentOutput
 from stillopen_core.gateway.router import AgentGateway, get_gateway
 from stillopen_core.google.factory import get_google
 from stillopen_core.google.workspace import GoogleWorkspace
 from stillopen_core.observability.logger import get_logger
+from stillopen_core.observability.tracing import current_trace_id, start_span
 from stillopen_core.schemas.agent import ClerkOutput, TabApply, VerifyReport
 from stillopen_core.schemas.artifact import ArtifactRecord
 from stillopen_core.schemas.plan import Plan, PlanStatus
@@ -45,13 +46,49 @@ def run_plan(
     gateway: AgentGateway | None = None,
 ) -> RunResult:
     plan.status = PlanStatus.RUNNING
-    google = google or get_google(plan.user_id)
+    try:
+        google = google or get_google(plan.user_id)
+    except ConfigError as exc:
+        empty = TabApply()
+        report = VerifyReport(
+            artifacts_ok=False,
+            apply_ok=False,
+            missing=["google"],
+            notes=str(exc),
+        )
+        plan.status = PlanStatus.DEGRADED
+        return RunResult(plan=plan, drafts=None, records=[], apply=empty, report=report)
     gw = gateway or get_gateway()
+    with start_span(
+        "stillopen.run_plan",
+        plan_id=plan.plan_id,
+        user_id=plan.user_id,
+    ):
+        plan.trace_id = current_trace_id() or plan.trace_id
+        return _run_plan_inner(
+            plan,
+            tabs,
+            google=google,
+            clerk_raw=clerk_raw,
+            clerk_retry_raw=clerk_retry_raw,
+            gateway=gw,
+        )
+
+
+def _run_plan_inner(
+    plan: Plan,
+    tabs: list[SanitizedTab],
+    *,
+    google: GoogleWorkspace,
+    clerk_raw: str | None,
+    clerk_retry_raw: str | None,
+    gateway: AgentGateway,
+) -> RunResult:
     drafts: ClerkOutput | None = None
     clerk_name = "heuristic"
     try:
         drafts = draft_or_degrade(
-            plan, tabs, raw_json=clerk_raw, allow_adk=clerk_raw is None, gateway=gw
+            plan, tabs, raw_json=clerk_raw, allow_adk=clerk_raw is None, gateway=gateway
         )
         clerk_name = "adk" if clerk_raw is None and drafts is not None else "heuristic"
         if clerk_raw is not None:
@@ -60,7 +97,7 @@ def run_plan(
         _logger.info("conductor.clerk_retry", plan_id=plan.plan_id)
         try:
             drafts = draft_or_degrade(
-                plan, tabs, raw_json=clerk_retry_raw, allow_adk=False, gateway=gw
+                plan, tabs, raw_json=clerk_retry_raw, allow_adk=False, gateway=gateway
             )
             clerk_name = "heuristic"
         except (InvalidAgentOutput, GatewayError) as exc:
@@ -75,7 +112,7 @@ def run_plan(
             return RunResult(plan=plan, drafts=None, records=[], apply=empty, report=report)
 
     try:
-        records, apply = execute(plan, drafts, tabs, google, gateway=gw)
+        records, apply = execute(plan, drafts, tabs, google, gateway=gateway)
     except Exception as exc:  # noqa: BLE001 — compensate, don't close
         plan.status = PlanStatus.DEGRADED
         empty = TabApply()
@@ -89,7 +126,7 @@ def run_plan(
             plan=plan, drafts=drafts, records=[], apply=empty, report=report, clerk=clerk_name
         )
 
-    report = verify(records, apply, google, plan, gateway=gw)
+    report = verify(records, apply, google, plan, gateway=gateway)
     apply = safe_apply(apply, report)
     plan.status = PlanStatus.VERIFIED if report.artifacts_ok else PlanStatus.DEGRADED
     if report.artifacts_ok:

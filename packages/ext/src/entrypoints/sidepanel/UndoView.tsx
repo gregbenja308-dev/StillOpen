@@ -1,4 +1,4 @@
-import type { CloseBatch, RunResponse } from "@/lib/schema";
+import type { CloseBatch } from "@/lib/schema";
 
 function hostOf(url: string): string {
   try {
@@ -15,12 +15,10 @@ function when(ms: number): string {
 
 export function UndoView({
   batches,
-  lastRun,
   busy,
   onRestore,
 }: {
   batches: CloseBatch[];
-  lastRun: RunResponse | null;
   busy: boolean;
   onRestore: (batchId: string) => void;
 }) {
@@ -57,24 +55,10 @@ export function UndoView({
                 </li>
               ))}
             </ul>
+            {batch.notes?.trim() ? <p className="restore-note">{batch.notes}</p> : null}
           </section>
         ))
       )}
-
-      {lastRun?.artifacts.length ? (
-        <section className="panel">
-          <p className="kicker">Saved</p>
-          <ul className="site-list">
-            {lastRun.artifacts.map((row) => (
-              <li key={row.record_id}>
-                <a className="artifact" href={row.url} target="_blank" rel="noreferrer">
-                  {row.title || row.kind}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
     </div>
   );
 }

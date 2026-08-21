@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from stillopen_api.main import create_app
+from stillopen_core.memory.tasks import infer_tasks
 from stillopen_core.schemas.tab import TabSnapshot
 
 
@@ -9,6 +10,7 @@ def test_healthz() -> None:
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
     assert res.json()["run_graph"] == "clerk>runner>verifier"
+    assert res.json()["armor"] == "inline"
 
 
 def test_create_plan_from_fixture(seeded_tabs: list[TabSnapshot]) -> None:
@@ -99,3 +101,25 @@ def test_memory_chat_lists_news_tabs(seeded_tabs: list[TabSnapshot]) -> None:
     assert body["matches"]
     assert any(row["host"] == "nytimes.com" for row in body["matches"])
     assert "stale" not in body["reply"].lower()
+
+
+def test_memory_chat_house_prompt_uses_tasks(seeded_tabs: list[TabSnapshot]) -> None:
+    tasks = infer_tasks(seeded_tabs)
+    client = TestClient(create_app())
+    res = client.post(
+        "/v1/memory/chat",
+        json={
+            "user_id": "local-dev",
+            "message": "delete any house/real-estate tabs",
+            "tabs": [t.model_dump(mode="json") for t in seeded_tabs],
+            "tasks": [t.model_dump(mode="json") for t in tasks],
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["wants_close"] is True
+    hosts = {row["host"] for row in body["matches"]}
+    assert "zillow.com" in hosts
+    assert "redfin.com" in hosts
+    assert "shop.example.com" not in hosts
+    assert "chase.com" not in hosts

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from stillopen_core.observability.logger import get_logger
 from stillopen_core.schemas.tab import SanitizedTab, TabSnapshot
+from stillopen_core.security.armor import armor_title
 from stillopen_core.security.hosts import blocked_from_model, classify_host
 from stillopen_core.security.redact import host_of, redact_text, redact_url
 
@@ -21,7 +22,7 @@ def sanitize_tabs(tabs: list[TabSnapshot]) -> list[SanitizedTab]:
         extract = None if deny else redact_text(tab.extract)
         if deny:
             blocked += 1
-        title = redact_text(tab.title, max_chars=200) or ""
+        title = armor_title(redact_text(tab.title, max_chars=200) or "")
         out.append(
             SanitizedTab(
                 tab_id=tab.tab_id,

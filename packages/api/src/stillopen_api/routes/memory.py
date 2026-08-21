@@ -21,6 +21,7 @@ from stillopen_core.schemas.habit import (
     ScheduledClose,
 )
 from stillopen_core.schemas.tab import TabSnapshot
+from stillopen_core.schemas.task import OpenTask
 
 router = APIRouter(prefix="/v1/memory", tags=["memory"])
 
@@ -31,6 +32,7 @@ class ChatRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=500)
     tabs: list[TabSnapshot] = Field(default_factory=list, max_length=200)
+    tasks: list[OpenTask] = Field(default_factory=list, max_length=80)
 
 
 class ChatResponse(BaseModel):
@@ -101,7 +103,11 @@ def chat_memory(body: ChatRequest) -> ChatResponse:
     intent = interpret_preference(body.message)
     apply_chat(profile, body.message, intent)
     bank.put_habit(profile)
-    matches = match_tabs(body.tabs, intent) if body.tabs else []
+    matches = (
+        match_tabs(body.tabs, intent, tasks=body.tasks or None, query=body.message)
+        if body.tabs
+        else []
+    )
     return ChatResponse(
         reply=intent.reply,
         parser=intent.parser,

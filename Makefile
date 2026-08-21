@@ -55,20 +55,67 @@ ext-dev: ## Extension HMR (broken after outDir=dist — use make ext)
 	npm --prefix packages/ext run dev
 
 .PHONY: deploy
-deploy: ## Cloud Run from source (Still Open GCP project only)
+deploy: ## Cloud Run from source (Vertex + Firestore + Cloud Trace)
+	@test -n "$${GOOGLE_CLOUD_PROJECT}" || (echo "Set GOOGLE_CLOUD_PROJECT" && exit 1)
 	gcloud run deploy stillopen \
 		--source . \
+		--project $${GOOGLE_CLOUD_PROJECT} \
 		--region $${GOOGLE_CLOUD_REGION:-us-central1} \
 		--allow-unauthenticated \
-		--set-env-vars STILLOPEN_ENV=cloud,GOOGLE_CLOUD_PROJECT=$${GOOGLE_CLOUD_PROJECT}
+		--set-env-vars STILLOPEN_ENV=cloud,GOOGLE_CLOUD_PROJECT=$${GOOGLE_CLOUD_PROJECT},GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_REGION=$${GOOGLE_CLOUD_REGION:-us-central1},GOOGLE_CLOUD_LOCATION=$${GOOGLE_CLOUD_LOCATION:-global},STILLOPEN_OTEL_EXPORTER=gcp,STILLOPEN_LIVE_GOOGLE=1,STILLOPEN_FAST_MODEL=gemini-3.5-flash,STILLOPEN_REASONING_MODEL=gemini-3.5-pro
+
+.PHONY: cloud-apis
+cloud-apis: ## Enable Cloud Run, Vertex, Firestore, Scheduler, Secret Manager, Trace
+	@test -n "$${GOOGLE_CLOUD_PROJECT}" || (echo "Set GOOGLE_CLOUD_PROJECT" && exit 1)
+	gcloud services enable \
+		run.googleapis.com \
+		aiplatform.googleapis.com \
+		firestore.googleapis.com \
+		cloudscheduler.googleapis.com \
+		secretmanager.googleapis.com \
+		cloudtrace.googleapis.com \
+		--project $${GOOGLE_CLOUD_PROJECT}
+
+.PHONY: cloud-iam
+cloud-iam: ## Grant the Cloud Run default SA Vertex, Firestore, secrets, Trace
+	@test -n "$${GOOGLE_CLOUD_PROJECT}" || (echo "Set GOOGLE_CLOUD_PROJECT" && exit 1)
+	@num=$$(gcloud projects describe $${GOOGLE_CLOUD_PROJECT} --format='value(projectNumber)'); \
+	sa="$${num}-compute@developer.gserviceaccount.com"; \
+	for role in roles/aiplatform.user roles/datastore.user roles/secretmanager.secretAccessor roles/cloudtrace.agent; do \
+	  gcloud projects add-iam-policy-binding $${GOOGLE_CLOUD_PROJECT} --member="serviceAccount:$${sa}" --role="$${role}" --condition=None >/dev/null; \
+	done; \
+	echo "IAM granted to $${sa}"
+
+.PHONY: secrets-init
+secrets-init: ## Create Secret Manager ids (job token + Fernet key) if missing
+	@test -n "$${GOOGLE_CLOUD_PROJECT}" || (echo "Set GOOGLE_CLOUD_PROJECT" && exit 1)
+	@if ! gcloud secrets describe stillopen-token-key --project $${GOOGLE_CLOUD_PROJECT} >/dev/null 2>&1; then \
+	  $(UV) run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode(), end='')" | \
+	    gcloud secrets create stillopen-token-key --data-file=- --project $${GOOGLE_CLOUD_PROJECT}; \
+	fi
+	@if ! gcloud secrets describe stillopen-job-token --project $${GOOGLE_CLOUD_PROJECT} >/dev/null 2>&1; then \
+	  python3 -c "import secrets; print(secrets.token_urlsafe(32), end='')" | \
+	    gcloud secrets create stillopen-job-token --data-file=- --project $${GOOGLE_CLOUD_PROJECT}; \
+	fi
+	@echo "Secrets ready: stillopen-token-key, stillopen-job-token"
 
 .PHONY: scheduler
-scheduler: ## Create a 30-min Watch tick (requires Cloud Run URL + STILLOPEN_JOB_TOKEN)
+scheduler: ## Create or update the 30-min Watch tick (URL=https://….run.app)
 	@test -n "$(URL)" || (echo "URL=https://….run.app required" && exit 1)
-	gcloud scheduler jobs create http stillopen-watch \
+	@test -n "$${STILLOPEN_JOB_TOKEN}" || (echo "STILLOPEN_JOB_TOKEN required" && exit 1)
+	gcloud scheduler jobs update http stillopen-watch \
 		--location $${GOOGLE_CLOUD_REGION:-us-central1} \
 		--schedule "*/30 * * * *" \
 		--uri "$(URL)/v1/jobs/watch" \
 		--http-method POST \
 		--headers "X-Stillopen-Job-Token=$${STILLOPEN_JOB_TOKEN}" \
-		--attempt-deadline 120s
+		--attempt-deadline 120s \
+		--project $${GOOGLE_CLOUD_PROJECT} \
+	|| gcloud scheduler jobs create http stillopen-watch \
+		--location $${GOOGLE_CLOUD_REGION:-us-central1} \
+		--schedule "*/30 * * * *" \
+		--uri "$(URL)/v1/jobs/watch" \
+		--http-method POST \
+		--headers "X-Stillopen-Job-Token=$${STILLOPEN_JOB_TOKEN}" \
+		--attempt-deadline 120s \
+		--project $${GOOGLE_CLOUD_PROJECT}

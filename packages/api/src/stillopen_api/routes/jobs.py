@@ -15,8 +15,11 @@ router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 @router.post("/watch")
 def watch_tick(x_stillopen_job_token: str | None = Header(default=None)) -> dict[str, object]:
     settings = get_settings()
-    if settings.job_token and x_stillopen_job_token != settings.job_token:
-        raise HTTPException(status_code=401, detail="bad job token")
+    if not settings.is_local:
+        if not settings.job_token:
+            raise HTTPException(status_code=503, detail="STILLOPEN_JOB_TOKEN is not set")
+        if x_stillopen_job_token != settings.job_token:
+            raise HTTPException(status_code=401, detail="bad job token")
     live = settings.env.value == "cloud" or os.environ.get("STILLOPEN_WATCH_FETCH") == "1"
     fetcher = hash_only_fetch if live else fetch_forbidden
     acted = tick(fetcher=fetcher)

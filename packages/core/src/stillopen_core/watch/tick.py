@@ -10,6 +10,7 @@ from stillopen_core.google.factory import get_google
 from stillopen_core.google.workspace import GoogleWorkspace
 from stillopen_core.memory.fakes import get_bank
 from stillopen_core.observability.logger import get_logger
+from stillopen_core.observability.tracing import start_span
 from stillopen_core.schemas.artifact import ArtifactKind, ArtifactRecord
 from stillopen_core.schemas.base import now_utc
 from stillopen_core.schemas.watch import Watch, WatchKind, WatchStatus
@@ -31,6 +32,17 @@ def tick(
     user_id: str | None = None,
 ) -> list[Watch]:
     """Process due watches. Stores hashes only — never page HTML."""
+    with start_span("stillopen.watch_tick"):
+        return _tick(fetcher=fetcher, google=google, at=at, user_id=user_id)
+
+
+def _tick(
+    *,
+    fetcher: Fetcher,
+    google: GoogleWorkspace | None,
+    at: datetime | None,
+    user_id: str | None,
+) -> list[Watch]:
     google = google or get_google(user_id)
     when = at or now_utc()
     if when.tzinfo is None:

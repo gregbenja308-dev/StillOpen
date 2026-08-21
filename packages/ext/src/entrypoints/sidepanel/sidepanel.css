@@ -84,6 +84,39 @@ h2 {
   line-height: 1.45;
 }
 
+.scanning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--undo);
+  border-color: #b7c9b0;
+}
+
+.scanning-copy {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #c5d4c4;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .panel,
 .card,
 .undo-dock {
@@ -255,6 +288,8 @@ button.primary {
 }
 
 .chat-hits {
+  position: relative;
+  overflow: visible;
   border-color: var(--accent);
 }
 
@@ -473,6 +508,8 @@ button.linkish {
 }
 
 .task-card {
+  position: relative;
+  overflow: visible;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -480,7 +517,23 @@ button.linkish {
 }
 
 .task-card.protected {
-  opacity: 0.85;
+  background: #f4eee4;
+  border-color: #c9a56a;
+  box-shadow: inset 4px 0 0 #8a6428;
+}
+
+.task-card.protected h2,
+.task-card.protected .task-count,
+.task-card.protected .chevron {
+  color: #6b4a18;
+}
+
+.protect-why {
+  margin: 8px 0 0;
+  color: #6b4a18;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .task-top {
@@ -676,35 +729,55 @@ button.linkish {
 
 .confetti {
   pointer-events: none;
-  position: fixed;
-  inset: 0;
-  height: min(70vh, 420px);
-  overflow: hidden;
-  z-index: 40;
-}
-
-.confetti span {
   position: absolute;
-  top: -12px;
-  width: 8px;
-  height: 14px;
-  border-radius: 2px;
+  inset: -28px;
+  overflow: visible;
+  z-index: 6;
+}
+
+.confetti i {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  display: block;
+  font-style: normal;
   background: var(--accent);
-  animation: fall 1.4s ease-in forwards;
+  animation: pop 1.9s cubic-bezier(0.16, 0.7, 0.3, 1) forwards;
+  animation-delay: var(--d, 0ms);
+  opacity: 0;
 }
 
-.confetti span:nth-child(3n) {
-  background: #c4a35a;
+.confetti .dot {
+  width: var(--s, 8px);
+  height: var(--s, 8px);
+  border-radius: 50%;
+  margin: calc(var(--s, 8px) / -2);
 }
 
-.confetti span:nth-child(3n + 1) {
-  background: #d45b3a;
+.confetti .tick {
+  width: 3px;
+  height: 11px;
+  border-radius: 1px;
+  margin: -5px -1px;
 }
 
-@keyframes fall {
-  to {
-    transform: translateY(min(70vh, 420px)) rotate(360deg);
-    opacity: 0.15;
+@keyframes pop {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0.4) rotate(0deg);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(var(--x) * 0.55), calc(var(--y) * 0.5)) scale(1.15)
+      rotate(calc(var(--r) * 0.5));
+  }
+  55% {
+    opacity: 1;
+    transform: translate(var(--x), var(--y)) scale(1) rotate(var(--r));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), calc(var(--y) + 10px)) scale(0.85) rotate(var(--r));
   }
 }
 
@@ -715,12 +788,53 @@ button.linkish {
   color: var(--muted);
 }
 
+.task-card.closing {
+  background: var(--undo);
+  border-color: #b7c9b0;
+}
+
+.closing-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .task-card .actions {
   margin-top: 0;
 }
 
 .task-card .actions .primary {
   margin-left: auto;
+}
+
+.task-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.task-notes textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.5rem;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  line-height: 1.4;
+  background: #fff;
+}
+
+.restore-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--undo);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
 }
 
 .quiet {

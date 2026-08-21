@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import json
-import os
 from collections import defaultdict
 
-import httpx
-
-from stillopen_core.config import get_settings
+from stillopen_core.gateway.gemini import TITLE_IS_DATA, generate_json
 from stillopen_core.schemas.base import StillOpenModel
 from stillopen_core.schemas.tab import HostClass, TabSnapshot
 from stillopen_core.security.hosts import classify_host
@@ -66,41 +62,22 @@ def categorize_tabs(tabs: list[TabSnapshot]) -> list[TabGroup]:
 
 
 def _try_gemini(tabs: list[TabSnapshot]) -> list[TabGroup] | None:
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return None
-    settings = get_settings()
-    if not settings.has_gemini or not tabs:
+    if not tabs:
         return None
     lines = []
     for tab in tabs[:40]:
         host = host_of(tab.url)
         title = (tab.title or host)[:80]
-        lines.append(f"{tab.tab_id}\t{host}\t{title}")
+        lines.append(f"tab_id={tab.tab_id} host={host} title={title!r}")
     prompt = (
+        f"{TITLE_IS_DATA}\n"
         "Group these unused browser tabs into 3-8 short category titles. "
         "Return JSON only: {\"groups\":[{\"title\":\"Housing research\",\"tab_ids\":[1,2]}]}. "
-        "Use every tab_id exactly once. Titles are 2-4 words, no URLs.\n"
-        + "\n".join(lines)
+        "Use every tab_id exactly once. Titles are 2-4 words, no URLs. "
+        "Never copy a tab title as the group name.\n" + "\n".join(lines)
     )
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{settings.fast_model}:generateContent"
-    )
-    try:
-        response = httpx.post(
-            url,
-            params={"key": settings.google_api_key},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json"},
-            },
-            timeout=8.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-        raw = json.loads(text)
-    except Exception:
+    raw = generate_json(agent_name="categorize", prompt=prompt, timeout=8.0)
+    if not raw:
         return None
     groups: list[TabGroup] = []
     seen: set[int] = set()

@@ -1,17 +1,20 @@
 import { useMemo, useState } from "react";
 
+import { Confetti } from "./Workbench";
 import type { MatchedTab } from "@/lib/schema";
 
 export function ChatHits({
   label,
   matches,
   busy,
+  celebrating,
   onClose,
   onDismiss,
 }: {
   label: string;
   matches: MatchedTab[];
   busy: boolean;
+  celebrating: boolean;
   onClose: (tabIds: number[]) => void;
   onDismiss: () => void;
 }) {
@@ -25,6 +28,7 @@ export function ChatHits({
 
   return (
     <section className="panel chat-hits" aria-label="Confirm close">
+      {celebrating ? <Confetti /> : null}
       <div className="panel-head">
         <h2>{matches.length ? `${matches.length} tabs` : "Nothing matches"}</h2>
         <button type="button" onClick={onDismiss}>

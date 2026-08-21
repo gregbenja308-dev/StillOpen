@@ -35,6 +35,7 @@ class OpenTask(StillOpenModel):
     quiet: bool = False
     intention: Intention = Intention.UNKNOWN
     user_locked: bool = False
+    notes: str = Field(default="", max_length=4000)
 
     @field_validator("kind", mode="before")
     @classmethod

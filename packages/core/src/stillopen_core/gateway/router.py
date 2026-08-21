@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from stillopen_core.errors import AgentUnavailable, RateLimitExceeded, ToolNotPermitted
 from stillopen_core.gateway.policies import GatewayPolicy, load_default_policy
 from stillopen_core.observability.logger import get_logger
+from stillopen_core.observability.tracing import start_span
 
 _logger = get_logger(__name__)
 
@@ -59,14 +60,16 @@ class AgentGateway:
     ) -> T:
         """Same allowlist as ``invoke``, for the sync Docs/Calendar path."""
         self.permit(agent_name=agent_name, tool_name=tool_name)
-        return fn(**kwargs)
+        with start_span("gateway.invoke", agent=agent_name, tool=tool_name):
+            return fn(**kwargs)
 
     async def invoke(self, *, agent_name: str, tool_name: str, **kwargs: Any) -> Any:
         self.permit(agent_name=agent_name, tool_name=tool_name)
         handler = self._handlers.get(tool_name)
         if handler is None:
             raise AgentUnavailable(f"tool {tool_name!r} is not registered")
-        return await handler(**kwargs)
+        with start_span("gateway.invoke", agent=agent_name, tool=tool_name):
+            return await handler(**kwargs)
 
 
 def get_gateway() -> AgentGateway:

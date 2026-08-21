@@ -3,6 +3,7 @@ from stillopen_core.memory.chat import apply_chat, parse_preference
 from stillopen_core.memory.fakes import get_bank
 from stillopen_core.memory.habits import mutate
 from stillopen_core.memory.match import match_tabs
+from stillopen_core.memory.tasks import infer_tasks
 from stillopen_core.schemas.habit import ClosePolicy, FeedbackKind, HabitEvent, HabitProfile
 from stillopen_core.schemas.tab import TabSnapshot
 
@@ -76,7 +77,9 @@ def test_delete_news_tabs_matches_now_not_stale_only(seeded_tabs: list[TabSnapsh
     assert "news" in intent.match_classes
     assert "nytimes.com" not in intent.close_hosts
     assert "stale" not in intent.reply.lower()
-    hits = match_tabs(seeded_tabs, intent, now_ms=1_800_000_000_000)
+    hits = match_tabs(
+        seeded_tabs, intent, query="Delete any news tabs", now_ms=1_800_000_000_000
+    )
     hosts = {row.host for row in hits}
     assert "nytimes.com" in hosts
     assert "zillow.com" not in hosts
@@ -104,3 +107,68 @@ def test_heuristic_groups_seeded_window(seeded_tabs: list[TabSnapshot]) -> None:
     assert 16 in by_title["Banking"]
     assigned = [i for g in groups for i in g.tab_ids]
     assert len(assigned) == len(set(assigned)) == len(seeded_tabs)
+
+
+def _snap(tab_id: int, url: str, title: str) -> TabSnapshot:
+    return TabSnapshot(
+        tab_id=tab_id,
+        window_id=1,
+        index=tab_id,
+        url=url,
+        title=title,
+        pinned=False,
+        audible=False,
+        discarded=False,
+        active=False,
+        group_id=-1,
+        last_accessed_ms=1,
+        extract=None,
+    )
+
+
+def test_house_prompt_picks_related_tasks_not_github_or_lookup() -> None:
+    tabs = [
+        _snap(1, "https://www.zillow.com/austin-tx/", "Zillow Austin"),
+        _snap(2, "https://www.redfin.com/city/30818/TX/Austin", "Redfin Austin"),
+        _snap(3, "https://www.apartments.com/austin-tx/", "Apartments.com Austin"),
+        _snap(4, "https://www.nytimes.com/section/realestate", "NYT real estate"),
+        _snap(5, "https://www.merriam-webster.com/dictionary/ephemeral", "Dictionary: ephemeral"),
+        _snap(6, "https://en.wikipedia.org/wiki/Ephemeral", "Wikipedia: Ephemeral"),
+        _snap(7, "https://github.com/google/adk-python", "GitHub: google/adk-python"),
+        _snap(8, "https://www.amazon.com/s?k=macbook+air", "Amazon: MacBook Air"),
+        _snap(9, "https://www.bbc.com/news", "BBC News"),
+        _snap(10, "https://www.chase.com/", "Chase"),
+    ]
+    tasks = infer_tasks(tabs)
+    prompt = "delete any house/real-estate tabs"
+    intent = parse_preference(prompt)
+    assert intent.wants_close is True
+    hits = match_tabs(tabs, intent, tasks=tasks, query=prompt)
+    ids = {row.tab_id for row in hits}
+    assert {1, 2, 3}.issubset(ids)
+    assert 4 in ids
+    assert 5 not in ids
+    assert 6 not in ids
+    assert 7 not in ids
+    assert 8 not in ids
+    assert 9 not in ids
+    assert 10 not in ids
+    owners = {tid: task.task_id for task in tasks for tid in task.tab_ids}
+    assert len({owners[i] for i in ids}) >= 1
+
+
+def test_close_without_a_topic_does_not_mean_every_tab(seeded_tabs: list[TabSnapshot]) -> None:
+    intent = parse_preference("delete any tabs")
+    hits = match_tabs(seeded_tabs, intent, tasks=infer_tasks(seeded_tabs), query="delete any tabs")
+    assert hits == []
+
+
+def test_news_prompt_uses_news_tasks_not_housing(seeded_tabs: list[TabSnapshot]) -> None:
+    tasks = infer_tasks(seeded_tabs)
+    prompt = "Delete any news tabs"
+    intent = parse_preference(prompt)
+    hits = match_tabs(seeded_tabs, intent, tasks=tasks, query=prompt, now_ms=1_800_000_000_000)
+    hosts = {row.host for row in hits}
+    assert "nytimes.com" in hosts
+    assert "zillow.com" not in hosts
+    assert "github.com" not in hosts

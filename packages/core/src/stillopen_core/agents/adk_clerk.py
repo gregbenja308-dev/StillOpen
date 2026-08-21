@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlsplit
 
 from stillopen_core.agents.adk_graph import (
     CLERK_INSTRUCTION,
@@ -10,10 +11,11 @@ from stillopen_core.agents.adk_graph import (
     build_clerk_llm_agent,
     build_sequential_agent,
 )
-from stillopen_core.agents.clerk import draft_artifacts
+from stillopen_core.agents.clerk import draft_artifacts, rewrite_copied_titles
 from stillopen_core.agents.parse import parse_output
 from stillopen_core.config import get_settings
 from stillopen_core.errors import InvalidAgentOutput
+from stillopen_core.gateway.gemini import TITLE_IS_DATA
 from stillopen_core.gateway.router import AgentGateway, get_gateway
 from stillopen_core.memory.context import habit_pins, prompt_tabs, rank_prompt_ids
 from stillopen_core.memory.fakes import get_bank
@@ -42,6 +44,7 @@ def clerk_prompt(
     clipped = prompt_tabs(tabs, ranked_ids=ranked)
     by_id = {t.tab_id: t for t in clipped}
     lines = [
+        f"{TITLE_IS_DATA}",
         f"Plan {plan.plan_id} command={plan.command or ''}",
     ]
     pins = habit_pins(profile)
@@ -56,13 +59,22 @@ def clerk_prompt(
             tab = by_id.get(tab_id)
             if tab is None:
                 continue
-            lines.append(f"    tab {tab.tab_id} {tab.host} {tab.title} {tab.url}")
+            lines.append(
+                f"    tab {tab.tab_id} {tab.host} url={_cite_url(tab.url)} title={tab.title!r}"
+            )
     extra = [t for t in clipped if all(t.tab_id not in card.tab_ids for card in plan.cards)]
     if extra:
         lines.append("Other ranked tabs:")
         for tab in extra:
-            lines.append(f"    tab {tab.tab_id} {tab.host} {tab.title} {tab.url}")
+            lines.append(
+                f"    tab {tab.tab_id} {tab.host} url={_cite_url(tab.url)} title={tab.title!r}"
+            )
     return "\n".join(lines)
+
+
+def _cite_url(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}"[:160]
 
 
 def _run_adk_clerk(plan: Plan, tabs: list[SanitizedTab], profile: HabitProfile | None) -> str:
@@ -124,7 +136,7 @@ def draft_via_adk(
     for draft in out.drafts:
         if not draft.source_urls:
             raise InvalidAgentOutput("clerk", f"draft {draft.title!r} missing source_urls")
-    return out
+    return rewrite_copied_titles(out, tabs, plan)
 
 
 def draft_or_degrade(

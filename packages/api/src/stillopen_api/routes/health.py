@@ -24,8 +24,17 @@ def healthz() -> dict[str, str]:
         "status": "ok",
         "env": settings.env.value,
         "service": settings.service_name,
-        "gemini": "configured" if settings.has_gemini else "fakes",
-        "google": "live" if settings.use_live_google and settings.has_oauth else "fake",
+        "gemini": (
+            "vertex"
+            if settings.use_vertex and settings.gcp_project
+            else "configured"
+            if settings.has_gemini
+            else "fakes"
+        ),
+        "gcp_project": settings.gcp_project or "",
+        "vertex_location": settings.gcp_location if settings.use_vertex else "",
+        "otel": settings.otel_exporter.value,
+        "armor": settings.armor_backend,
         "bank": "firestore" if settings.use_firestore else "local_json",
         "clerk": clerk,
         "run_graph": ">".join(graph_names(graph) or [n.name for n in RUN_GRAPH]),
