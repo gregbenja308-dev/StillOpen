@@ -84,6 +84,8 @@ export const undoRowSchema = z.object({
   title: z.string(),
 });
 
+export type UndoRow = z.infer<typeof undoRowSchema>;
+
 export const closeBatchSchema = z.object({
   batch_id: z.string(),
   label: z.string(),

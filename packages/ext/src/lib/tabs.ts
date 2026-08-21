@@ -131,6 +131,23 @@ export async function peekBatches(): Promise<CloseBatch[]> {
   return loadBatches();
 }
 
+export async function updateBatchNotes(batchId: string, notes: string): Promise<CloseBatch | null> {
+  const stored = await chrome.storage.local.get({ closeBatches: [] as CloseBatch[] });
+  const batches = [...((stored.closeBatches ?? []) as CloseBatch[])];
+  const current = batches.find((row) => row.batch_id === batchId);
+  if (!current) {
+    return null;
+  }
+  const next = {
+    ...current,
+    notes: notes.trim().slice(0, 4000),
+  };
+  await chrome.storage.local.set({
+    closeBatches: batches.map((row) => (row.batch_id === batchId ? next : row)),
+  });
+  return next;
+}
+
 export async function restoreBatch(batchId: string): Promise<number> {
   const batches = await loadBatches();
   const batch = batches.find((row) => row.batch_id === batchId);

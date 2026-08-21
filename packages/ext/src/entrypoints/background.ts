@@ -12,6 +12,7 @@ import {
   restoreBatch,
   snapshotAllWindows,
   snapshotCurrentWindow,
+  updateBatchNotes,
 } from "@/lib/tabs";
 
 const DAILY_ALARM = "stillopen-daily-scan";
@@ -85,6 +86,7 @@ export default defineBackground(() => {
         whenMs?: number;
         label?: string;
         batchId?: string;
+        notes?: string;
       },
       _sender,
       sendResponse,
@@ -119,6 +121,15 @@ export default defineBackground(() => {
     if (message.type === "RESTORE_BATCH") {
       restoreBatch(typeof message.batchId === "string" ? message.batchId : "")
         .then((restored) => sendResponse({ ok: true, restored }))
+        .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
+      return true;
+    }
+    if (message.type === "UPDATE_BATCH_NOTES") {
+      updateBatchNotes(
+        typeof message.batchId === "string" ? message.batchId : "",
+        typeof message.notes === "string" ? message.notes : "",
+      )
+        .then((batch) => sendResponse({ ok: true, batch }))
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
       return true;
     }

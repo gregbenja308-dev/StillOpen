@@ -201,7 +201,8 @@ h2 {
   font-size: 13px;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="search"] {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -835,6 +836,59 @@ button.linkish {
   font-size: 13px;
   line-height: 1.4;
   white-space: pre-wrap;
+}
+
+.closed-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.closed-tabs li {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.closed-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px 12px;
+  background: #fff4d6;
+  border: 1px solid #e6c56a;
+  border-left: 4px solid #c49212;
+  border-radius: 2px 10px 10px 2px;
+  box-shadow: 0 1px 0 rgba(196, 146, 18, 0.18);
+}
+
+.closed-note .kicker {
+  color: #8a6410;
+}
+
+.closed-note textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #3d2e12;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.closed-note textarea:focus {
+  outline: none;
+}
+
+.closed-note textarea::placeholder {
+  color: #9a7b3a;
 }
 
 .quiet {

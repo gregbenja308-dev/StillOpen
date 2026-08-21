@@ -9,6 +9,7 @@ export type CloseReply =
   | { ok: false; error: string };
 export type UndoReply = { ok: true; restored: number } | { ok: false; error: string };
 export type RestorePreviewReply = { ok: true; batches: CloseBatch[] } | { ok: false; error: string };
+export type UpdateNotesReply = { ok: true; batch: CloseBatch | null } | { ok: false; error: string };
 export type DemoReply =
   | { ok: true; opened: number; already: number }
   | { ok: false; error: string };

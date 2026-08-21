@@ -25,6 +25,7 @@ import type {
   SnapshotReply,
   TabChangeMsg,
   UndoReply,
+  UpdateNotesReply,
 } from "@/lib/messaging";
 import { send } from "@/lib/messaging";
 import type {
@@ -34,6 +35,10 @@ import type {
   OpenTask,
   TabSnapshot,
 } from "@/lib/schema";
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
 
 function carryNotes(next: OpenTask[], prev: OpenTask[]): OpenTask[] {
   const byId = new Map(prev.map((task) => [task.task_id, task]));
@@ -345,6 +350,13 @@ export function App() {
     }
   }
 
+  function onNotes(batchId: string, notes: string) {
+    setBatches((prev) =>
+      prev.map((batch) => (batch.batch_id === batchId ? { ...batch, notes } : batch)),
+    );
+    void send<UpdateNotesReply>({ type: "UPDATE_BATCH_NOTES", batchId, notes });
+  }
+
   const loose = looseTabs(snapshots, board);
   const shownTasks =
     farewell && !board.tasks.some((task) => task.task_id === farewell.task_id)
@@ -365,7 +377,7 @@ export function App() {
             void refreshUndo();
           }}
         >
-          Restore{batches.length ? ` (${batches.length})` : ""}
+          Finished{batches.length ? ` (${batches.length})` : ""}
         </button>
         <button
           type="button"
@@ -388,7 +400,12 @@ export function App() {
       {view === "memory" ? (
         <MemoryView dump={memory} />
       ) : view === "undo" ? (
-        <UndoView batches={batches} busy={busy} onRestore={(id) => void onRestore(id)} />
+        <UndoView
+          batches={batches}
+          busy={busy}
+          onRestore={(id) => void onRestore(id)}
+          onNotes={onNotes}
+        />
       ) : (
         <>
           <ChatBox
@@ -445,7 +462,7 @@ export function App() {
             onMove={(tabId, fromId, toId) => void commit(moveTab(board, tabId, fromId, toId, snapshots))}
             onDropLoose={(tabId, toId) => void commit(dropLoose(board, tabId, toId, snapshots))}
           />
-          <p className="foot">Closes are real. Notes stay in Restore.</p>
+          <p className="foot">Closes are real. Notes stay in Finished.</p>
         </>
       )}
     </main>
