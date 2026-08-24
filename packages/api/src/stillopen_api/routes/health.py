@@ -10,6 +10,8 @@ router = APIRouter()
 
 
 @router.get("/healthz")
+@router.get("/health")
+@router.get("/v1/healthz")
 def healthz() -> dict[str, str]:
     settings = get_settings()
     graph = build_sequential_agent()

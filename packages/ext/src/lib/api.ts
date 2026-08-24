@@ -12,7 +12,7 @@ import {
   type TabSnapshot,
 } from "./schema";
 
-const DEFAULT_API = "http://127.0.0.1:8080";
+const DEFAULT_API = "https://stillopen-tqodm6o6za-uc.a.run.app";
 
 export async function apiBase(): Promise<string> {
   const stored = await chrome.storage.local.get({ apiBase: DEFAULT_API });

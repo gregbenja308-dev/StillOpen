@@ -81,7 +81,7 @@ cloud-iam: ## Grant the Cloud Run default SA Vertex, Firestore, secrets, Trace
 	@test -n "$${GOOGLE_CLOUD_PROJECT}" || (echo "Set GOOGLE_CLOUD_PROJECT" && exit 1)
 	@num=$$(gcloud projects describe $${GOOGLE_CLOUD_PROJECT} --format='value(projectNumber)'); \
 	sa="$${num}-compute@developer.gserviceaccount.com"; \
-	for role in roles/aiplatform.user roles/datastore.user roles/secretmanager.secretAccessor roles/cloudtrace.agent; do \
+	for role in roles/aiplatform.user roles/datastore.user roles/secretmanager.secretAccessor roles/cloudtrace.agent roles/storage.objectAdmin roles/artifactregistry.writer roles/logging.logWriter; do \
 	  gcloud projects add-iam-policy-binding $${GOOGLE_CLOUD_PROJECT} --member="serviceAccount:$${sa}" --role="$${role}" --condition=None >/dev/null; \
 	done; \
 	echo "IAM granted to $${sa}"
@@ -108,7 +108,7 @@ scheduler: ## Create or update the 30-min Watch tick (URL=https://….run.app)
 		--schedule "*/30 * * * *" \
 		--uri "$(URL)/v1/jobs/watch" \
 		--http-method POST \
-		--headers "X-Stillopen-Job-Token=$${STILLOPEN_JOB_TOKEN}" \
+		--update-headers "X-Stillopen-Job-Token=$${STILLOPEN_JOB_TOKEN}" \
 		--attempt-deadline 120s \
 		--project $${GOOGLE_CLOUD_PROJECT} \
 	|| gcloud scheduler jobs create http stillopen-watch \

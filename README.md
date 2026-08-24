@@ -34,6 +34,12 @@ make ext                # packages/ext/dist/chrome-mv3
 
 Chrome → `chrome://extensions` → Developer mode → Load unpacked → `packages/ext/dist/chrome-mv3`.
 
+The unpacked build talks to the hosted Cloud Run API. To use a local API instead, in the extension service worker console:
+
+```js
+chrome.storage.local.set({ apiBase: "http://127.0.0.1:8080" })
+```
+
 **Closes are real.** Use the synthetic demo window, not your personal tabs.
 
 ```bash
@@ -43,7 +49,7 @@ Open demo tabs → “Find a place in Austin” → notes → I’m done → Res
 
 ## Production (Cloud Run)
 
-Judges: hosted URL is the API. Point the extension `apiBase` at it.
+Judges: hosted API is https://stillopen-tqodm6o6za-uc.a.run.app (health: `/health`). Load unpacked `packages/ext/dist/chrome-mv3` — it uses that URL by default.
 
 ```bash
 export GOOGLE_CLOUD_PROJECT=your-gcp-project
@@ -62,7 +68,7 @@ export STILLOPEN_JOB_TOKEN=$(gcloud secrets versions access latest --secret=stil
 make scheduler URL=https://stillopen-xxxxx.run.app
 ```
 
-Confirm `/healthz` shows:
+Confirm `/health` shows:
 
 | Field | Production value |
 |---|---|
