@@ -1,3 +1,4 @@
+import pytest
 from stillopen_core.memory.categorize import heuristic_groups
 from stillopen_core.memory.chat import apply_chat, parse_preference
 from stillopen_core.memory.fakes import get_bank
@@ -13,6 +14,52 @@ def test_chat_answers_what_stale_means() -> None:
     assert intent.wants_close is False
     assert "7 days" in intent.reply
     assert "does not depend" in intent.reply.lower()
+
+
+def test_which_unused_tabs_lists_idle_not_recent() -> None:
+    prompt = "which tabs haven't been opened in 30 days"
+    intent = parse_preference(prompt)
+    assert intent.wants_close is True
+    assert intent.unused_days == 30
+    assert intent.stale_cutoff_days is None
+    now = 1_800_000_000_000
+    old = now - 40 * 24 * 60 * 60 * 1000
+    recent = now - 2 * 24 * 60 * 60 * 1000
+    tabs = [
+        _snap(1, "https://www.nytimes.com/", "NYT"),
+        _snap(2, "https://www.zillow.com/austin", "Zillow Austin"),
+    ]
+    tabs[0].last_accessed_ms = old
+    tabs[1].last_accessed_ms = recent
+    hits = match_tabs(tabs, intent, query=prompt, now_ms=now)
+    assert {row.tab_id for row in hits} == {1}
+
+
+def test_gemini_faq_does_not_hide_unused_tab_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "stillopen_core.memory.chat.generate_json",
+        lambda **_kwargs: {
+            "stale_cutoff_days": 30,
+            "unused_days": None,
+            "keep_hosts": [],
+            "close_hosts": [],
+            "match_classes": [],
+            "wants_close": False,
+            "label": "",
+            "reply": (
+                "Still Open flags tabs as unused or stale if you haven't viewed "
+                "them within your set cutoff period, which is 30 days in this case. "
+                "You can see these inactive tabs grouped on your board."
+            ),
+        },
+    )
+    from stillopen_core.memory.chat import interpret_preference
+
+    intent = interpret_preference("which tabs haven't been opened in 30 days")
+    assert intent.wants_close is True
+    assert intent.unused_days == 30
+    assert "here are the" in intent.reply.lower()
+    assert "grouped on your board" not in intent.reply.lower()
 
 
 def test_chat_explains_the_product() -> None:

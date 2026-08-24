@@ -412,10 +412,11 @@ export function App() {
             busy={busy}
             tasks={board.tasks}
             onApplied={(result, prompt) => {
-              if (result.wants_close) {
+              if (result.wants_close || result.matches.length > 0) {
                 setHits({ prompt, result });
                 return;
               }
+              setHits(null);
               void loadMemory();
             }}
           />

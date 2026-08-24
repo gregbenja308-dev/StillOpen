@@ -52,13 +52,26 @@ _CLASS_WORDS: dict[str, str] = {
 }
 
 _CUTOFF_RE = re.compile(
-    r"(?:haven['’]?t\s+(?:used|opened|accessed|touched)|unused|idle|older than|stale|not used)"
+    r"(?:haven['’]?t\s+(?:been\s+)?(?:used|opened|accessed|touched|viewed|looked\s+at)"
+    r"|unused|idle|older than|stale|not used)"
     r".{0,40}?(?:(?:in|for|after)\s+)?(?:a\s+|an\s+)?(\d+)?\s*"
     r"(day|days|week|weeks|fortnight|month|months)\b",
     re.IGNORECASE,
 )
 _CUTOFF_NUM_RE = re.compile(
     r"\b(\d+)\s*(day|days|week|weeks|month|months)\b",
+    re.IGNORECASE,
+)
+_IDLE_ASK_RE = re.compile(
+    r"\b(?:which|what|show|list|find)\s+(?:me\s+|the\s+)?tabs?\b",
+    re.IGNORECASE,
+)
+_IDLE_WORD_RE = re.compile(
+    r"\b(?:unused|stale|idle|opened|viewed|accessed|used)\b",
+    re.IGNORECASE,
+)
+_DEFINE_RE = re.compile(
+    r"\b(?:what does|what is|what['’]?s|whats|mean|explain)\b",
     re.IGNORECASE,
 )
 _HOST_RE = re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.IGNORECASE)
@@ -86,26 +99,27 @@ _PRODUCT = (
 )
 
 
+def lists_idle_tabs(message: str) -> bool:
+    text = message.strip()
+    if not text or _DEFINE_RE.search(text):
+        return False
+    cutoff = _cutoff_in(text)
+    if cutoff is not None:
+        return True
+    return bool(_IDLE_ASK_RE.search(text) and _IDLE_WORD_RE.search(text))
+
+
 def parse_preference(message: str) -> ChatIntent:
     text = message.strip()
     if not text:
         return ChatIntent(
             reply="Ask how tasks work, or what to close — for example, delete any news tabs."
         )
-    if _is_product_question(text) and not _CLOSE_COMMAND.search(text):
+    listing = lists_idle_tabs(text)
+    if _is_product_question(text) and not _CLOSE_COMMAND.search(text) and not listing:
         return ChatIntent(reply=_help_reply(text), parser="help")
 
-    cutoff: int | None = None
-    cut = _CUTOFF_RE.search(text)
-    if cut:
-        cutoff = _days(cut.group(1), cut.group(2))
-    elif re.search(r"\b(unused|stale|haven['’]?t used)\b", text, re.IGNORECASE):
-        num = _CUTOFF_NUM_RE.search(text)
-        if num:
-            cutoff = _days(num.group(1), num.group(2))
-        elif re.search(r"\ba week\b", text, re.IGNORECASE):
-            cutoff = 7
-
+    cutoff = _cutoff_in(text)
     hosts = _hosts_in(text)
     classes = _classes_in(text)
     keep: list[str] = []
@@ -116,11 +130,12 @@ def parse_preference(message: str) -> ChatIntent:
     elif hosts and not classes:
         close = hosts
 
-    wants_close = bool(_CLOSE_RE.search(text) or cutoff is not None) and not keep
+    closing = bool(_CLOSE_RE.search(text) or _CLOSE_COMMAND.search(text))
+    wants_close = bool(closing or listing or cutoff is not None) and not keep
     unused = cutoff if wants_close else None
     label = _label(classes, close, unused)
     return ChatIntent(
-        stale_cutoff_days=cutoff,
+        stale_cutoff_days=cutoff if closing else None,
         unused_days=unused,
         keep_hosts=keep,
         close_hosts=close,
@@ -128,7 +143,7 @@ def parse_preference(message: str) -> ChatIntent:
         wants_close=wants_close,
         label=label,
         reply=_reply(
-            cutoff,
+            cutoff if closing else None,
             keep,
             close,
             wants_close=wants_close,
@@ -228,22 +243,32 @@ def apply_chat(profile: HabitProfile, message: str, intent: ChatIntent) -> Habit
 
 
 def interpret_preference(message: str) -> ChatIntent:
-    gemini = _try_gemini(message)
-    if gemini is not None and gemini.reply and not gemini.wants_close:
-        return gemini
     heuristic = parse_preference(message)
+    gemini = _try_gemini(message)
     if gemini is None:
         return heuristic
+    if gemini.reply and not gemini.wants_close and not heuristic.wants_close:
+        return gemini
+    wants_close = gemini.wants_close or heuristic.wants_close
+    unused_days = gemini.unused_days or heuristic.unused_days
+    label = gemini.label or heuristic.label
+    # Listing unused tabs is a local match, not a product FAQ.
+    if heuristic.wants_close and not gemini.wants_close:
+        reply = heuristic.reply
+        parser = heuristic.parser
+    else:
+        reply = gemini.reply or heuristic.reply
+        parser = "gemini"
     merged = ChatIntent(
         stale_cutoff_days=gemini.stale_cutoff_days or heuristic.stale_cutoff_days,
-        unused_days=gemini.unused_days or heuristic.unused_days,
+        unused_days=unused_days,
         keep_hosts=_uniq([*gemini.keep_hosts, *heuristic.keep_hosts]),
         close_hosts=_uniq([*gemini.close_hosts, *heuristic.close_hosts]),
         match_classes=_uniq([*gemini.match_classes, *heuristic.match_classes]),
-        wants_close=gemini.wants_close or heuristic.wants_close,
-        label=gemini.label or heuristic.label,
-        reply=gemini.reply or heuristic.reply,
-        parser="gemini",
+        wants_close=wants_close,
+        label=label,
+        reply=reply,
+        parser=parser,
     )
     if not merged.reply:
         merged.reply = _reply(
@@ -264,13 +289,17 @@ def _try_gemini(message: str) -> ChatIntent | None:
         "tabs into named unfinished tasks (jobs, not website categories). "
         "Users expand a task, drag tabs between tasks, hit × to leave a tab open "
         "but out of the task, Demo Seed to open sample tabs, Rescan to regroup, "
-        "Restore to reopen closes from the last 30 days, and Done, close! to "
-        "finish a task (notes you typed stay in Restore). Bank/health/gov tabs "
+        "Finished to reopen closes from the last 30 days, and Done, close! to "
+        "finish a task (notes you typed stay in Finished). Bank/health/gov tabs "
         "are protected and never sent to a model. Unused/stale means the tab "
         "hasn't been looked at in N days (default 7).\n"
         "If they ask how the tool works or what a word means, answer in 1-3 "
-        "short sentences. Set wants_close false unless they clearly asked to "
-        "close or delete tabs now.\n"
+        "short sentences. Set wants_close false for definitions.\n"
+        "If they ask which/what/show/list tabs are unused, stale, idle, or not "
+        "opened/viewed in N days, set wants_close true and unused_days to N "
+        "(or null if they did not say N). Reply in one short sentence like "
+        "“Here are the tabs unused for 30 days.” Do not claim they are grouped "
+        "on the board — the app lists matching tabs under the chat.\n"
         "If they asked to close/keep tabs, extract that too. Matching uses the "
         "named tasks already on the board: include every related job, not every "
         "open tab. Housing is not the same as shopping. "
@@ -288,15 +317,18 @@ def _try_gemini(message: str) -> ChatIntent | None:
         return None
     days = raw.get("stale_cutoff_days")
     cutoff = int(days) if isinstance(days, int) and 1 <= days <= 90 else None
+    raw_unused = raw.get("unused_days")
+    unused = int(raw_unused) if isinstance(raw_unused, int) and 1 <= raw_unused <= 90 else None
+    wants_close = bool(raw.get("wants_close")) or unused is not None
     return ChatIntent(
-        stale_cutoff_days=cutoff,
-        unused_days=cutoff if raw.get("wants_close") else None,
+        stale_cutoff_days=cutoff if wants_close and _CLOSE_RE.search(message) else None,
+        unused_days=unused or (cutoff if wants_close else None),
         keep_hosts=_hosts_from(raw.get("keep_hosts")),
         close_hosts=_hosts_from(raw.get("close_hosts")),
         match_classes=_uniq(
             str(x).lower() for x in (raw.get("match_classes") or []) if str(x).strip()
         ),
-        wants_close=bool(raw.get("wants_close")),
+        wants_close=wants_close,
         label=str(raw.get("label") or "")[:80],
         reply=str(raw.get("reply") or "")[:700],
         parser="gemini",
@@ -366,6 +398,23 @@ def _help_reply(text: str) -> str:
             "ephemeral”, not “BBC News”. Same job together, different jobs split."
         )
     return _PRODUCT
+
+
+def _cutoff_in(text: str) -> int | None:
+    cut = _CUTOFF_RE.search(text)
+    if cut:
+        return _days(cut.group(1), cut.group(2))
+    if re.search(
+        r"\b(unused|stale|haven['’]?t\s+(?:been\s+)?(?:used|opened|accessed|touched|viewed))\b",
+        text,
+        re.IGNORECASE,
+    ):
+        num = _CUTOFF_NUM_RE.search(text)
+        if num:
+            return _days(num.group(1), num.group(2))
+        if re.search(r"\ba week\b", text, re.IGNORECASE):
+            return 7
+    return None
 
 
 def _days(count: str | None, unit: str) -> int:
@@ -444,4 +493,4 @@ def _reply(
     )
 
 
-__all__ = ["apply_chat", "interpret_preference", "parse_preference"]
+__all__ = ["apply_chat", "interpret_preference", "lists_idle_tabs", "parse_preference"]

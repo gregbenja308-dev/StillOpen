@@ -588,6 +588,15 @@ button.linkish {
   gap: 8px;
 }
 
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .chat-box {
   position: relative;
   border: 1px solid var(--line);
@@ -625,6 +634,26 @@ button.linkish {
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.45;
+  align-self: flex-start;
+  max-width: 92%;
+}
+
+.chat-user {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  align-self: flex-end;
+  max-width: 92%;
+}
+
+.chat-pending {
+  color: var(--muted);
+  font-style: italic;
 }
 
 .chat-row .status {

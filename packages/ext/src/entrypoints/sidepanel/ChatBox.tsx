@@ -1,9 +1,11 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { chatMemory } from "@/lib/api";
-import type { SnapshotReply } from "@/lib/messaging";
+import type { ScanReply } from "@/lib/messaging";
 import { send } from "@/lib/messaging";
 import type { ChatResponse, OpenTask } from "@/lib/schema";
+
+type Turn = { role: "user" | "assistant"; text: string };
 
 export function ChatBox({
   busy: parentBusy,
@@ -15,10 +17,18 @@ export function ChatBox({
   onApplied: (result: ChatResponse, message: string) => void;
 }) {
   const [text, setText] = useState("");
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [reply, setReply] = useState("");
+  const logRef = useRef<HTMLDivElement>(null);
   const locked = busy || parentBusy;
+
+  useEffect(() => {
+    const node = logRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [turns, busy]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -28,12 +38,13 @@ export function ChatBox({
     }
     setBusy(true);
     setError("");
+    setText("");
+    setTurns((prev) => [...prev, { role: "user", text: message }]);
     try {
-      const snap = await send<SnapshotReply>({ type: "SNAPSHOT" });
+      const snap = await send<ScanReply>({ type: "SCAN" });
       const tabs = snap.ok ? snap.tabs : [];
       const result = await chatMemory(message, tabs, tasks);
-      setText("");
-      setReply(result.reply);
+      setTurns((prev) => [...prev, { role: "assistant", text: result.reply }]);
       onApplied(result, message);
     } catch (err) {
       setError(String(err));
@@ -44,6 +55,16 @@ export function ChatBox({
 
   return (
     <form className="chat-row" onSubmit={onSubmit}>
+      {turns.length > 0 || busy ? (
+        <div className="chat-log" ref={logRef} role="log" aria-live="polite">
+          {turns.map((turn, index) => (
+            <p key={`${turn.role}-${index}`} className={turn.role === "user" ? "chat-user" : "chat-reply"}>
+              {turn.text}
+            </p>
+          ))}
+          {busy ? <p className="chat-reply chat-pending">Looking…</p> : null}
+        </div>
+      ) : null}
       <div className="chat-box">
         <textarea
           value={text}
@@ -64,7 +85,6 @@ export function ChatBox({
           {busy ? "…" : "Ask"}
         </button>
       </div>
-      {reply ? <p className="chat-reply">{reply}</p> : null}
       {error ? <p className="status">{error}</p> : null}
     </form>
   );

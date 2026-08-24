@@ -17,9 +17,13 @@ _STOP = frozenset(
         "about",
         "after",
         "always",
+        "been",
         "close",
+        "day",
+        "days",
         "delete",
         "drop",
+        "find",
         "from",
         "have",
         "idle",
@@ -28,16 +32,19 @@ _STOP = frozenset(
         "keep",
         "kill",
         "left",
+        "list",
         "month",
         "months",
         "never",
         "okay",
         "older",
         "open",
+        "opened",
         "please",
         "related",
         "relating",
         "remove",
+        "show",
         "stale",
         "still",
         "tabs",
@@ -50,9 +57,12 @@ _STOP = frozenset(
         "those",
         "unused",
         "used",
+        "viewed",
         "want",
         "week",
         "weeks",
+        "what",
+        "which",
         "window",
         "with",
     }
@@ -98,7 +108,10 @@ def match_tabs(
     now = now_ms if now_ms is not None else _now_ms()
     unused_ms = (intent.unused_days or 0) * _DAY_MS
     by_id = {t.tab_id: t for t in tabs}
-    terms = _query_tokens(query) | {c.lower() for c in intent.match_classes}
+    unused_only = bool(intent.unused_days) and not intent.close_hosts and not intent.match_classes
+    terms: set[str] = set()
+    if not unused_only:
+        terms = _query_tokens(query) | {c.lower() for c in intent.match_classes}
     topical = bool(terms or intent.close_hosts)
 
     related_ids: set[int] | None = None

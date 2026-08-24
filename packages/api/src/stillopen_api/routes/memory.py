@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from stillopen_core.errors import NotFound
 from stillopen_core.memory.categorize import TabGroup, categorize_tabs
-from stillopen_core.memory.chat import apply_chat, interpret_preference
+from stillopen_core.memory.chat import apply_chat, interpret_preference, lists_idle_tabs
 from stillopen_core.memory.fakes import bank_storage, get_bank
 from stillopen_core.memory.habits import mutate, set_cutoff
 from stillopen_core.memory.match import match_tabs
@@ -101,6 +101,14 @@ def chat_memory(body: ChatRequest) -> ChatResponse:
     bank = get_bank()
     profile = bank.habit_for(body.user_id)
     intent = interpret_preference(body.message)
+    if intent.unused_days is None and lists_idle_tabs(body.message):
+        intent.unused_days = profile.stale_cutoff_days
+        intent.wants_close = True
+        intent.label = intent.label or f"tabs unused {intent.unused_days} days"
+        intent.reply = (
+            f"Here are the tabs unused for {intent.unused_days} day"
+            f"{'s' if intent.unused_days != 1 else ''}. Close them now, or schedule a time."
+        )
     apply_chat(profile, body.message, intent)
     bank.put_habit(profile)
     matches = (

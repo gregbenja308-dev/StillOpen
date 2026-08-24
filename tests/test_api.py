@@ -103,6 +103,26 @@ def test_memory_chat_lists_news_tabs(seeded_tabs: list[TabSnapshot]) -> None:
     assert "stale" not in body["reply"].lower()
 
 
+def test_memory_chat_lists_tabs_not_opened_in_30_days(seeded_tabs: list[TabSnapshot]) -> None:
+    client = TestClient(create_app())
+    res = client.post(
+        "/v1/memory/chat",
+        json={
+            "user_id": "local-dev",
+            "message": "which tabs haven't been opened in 30 days",
+            "tabs": [t.model_dump(mode="json") for t in seeded_tabs],
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["wants_close"] is True
+    assert body["unused_days"] == 30
+    assert body["matches"]
+    assert body["profile"]["stale_cutoff_days"] == 7
+    assert "here are the" in body["reply"].lower()
+    assert "grouped on your board" not in body["reply"].lower()
+
+
 def test_memory_chat_house_prompt_uses_tasks(seeded_tabs: list[TabSnapshot]) -> None:
     tasks = infer_tasks(seeded_tabs)
     client = TestClient(create_app())
