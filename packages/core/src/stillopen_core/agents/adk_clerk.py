@@ -52,6 +52,13 @@ def clerk_prompt(
         lines.append("Habit pins (learned keep/close; honor these):")
         for pin in pins:
             lines.append(f"  {pin}")
+    if (plan.user_notes or "").strip():
+        lines.append(
+            "User notes (trusted, preserve verbatim under "
+            "'## Notes from the user' in every DOC draft):"
+        )
+        for row in (plan.user_notes or "").splitlines():
+            lines.append(f"  | {row}")
     lines.append("Cards:")
     for card in plan.cards:
         lines.append(f"- {card.card_id} verb={card.verb.value} label={card.label}")

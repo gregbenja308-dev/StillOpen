@@ -15,6 +15,7 @@ export function Workbench({
   onDemo,
   onNewTask,
   onDone,
+  onStillGoing,
   onRename,
   onNotes,
   onIgnore,
@@ -32,6 +33,7 @@ export function Workbench({
   onDemo: () => void;
   onNewTask: () => void;
   onDone: (task: OpenTask) => void;
+  onStillGoing: (task: OpenTask) => void;
   onRename: (taskId: string, label: string) => void;
   onNotes: (taskId: string, notes: string) => void;
   onIgnore: (taskId: string, tabId: number) => void;
@@ -206,6 +208,20 @@ export function Workbench({
                       }
                     >
                       Done, close!
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={busy || Boolean(closingId) || task.tab_ids.length === 0}
+                      title="Track these tabs; ping me when they change"
+                      onClick={() =>
+                        onStillGoing({
+                          ...task,
+                          notes: noteDrafts.current[task.task_id] ?? task.notes ?? "",
+                        })
+                      }
+                    >
+                      Still going
                     </button>
                   </div>
                 )}

@@ -62,6 +62,29 @@ class Settings(BaseSettings):
         default=r"chrome-extension://.*",
         alias="STILLOPEN_API_CORS_ORIGIN_REGEX",
     )
+    public_base_url: str = Field(
+        default="http://127.0.0.1:8080",
+        alias="STILLOPEN_PUBLIC_BASE_URL",
+        description="Base URL for shareable filing links (Cloud Run URL in prod).",
+    )
+    use_vertex_embeddings: bool = Field(
+        default=False,
+        alias="STILLOPEN_USE_VERTEX_EMBEDDINGS",
+        description="Route tab embeddings through text-embedding-004 on Vertex.",
+    )
+    gemma_model: str = Field(
+        default="",
+        alias="STILLOPEN_GEMMA_MODEL",
+        description="Vertex Gemma model id (e.g. gemma-2-9b-it). Empty = disabled.",
+    )
+    require_user_token: bool = Field(
+        default=False,
+        alias="STILLOPEN_REQUIRE_USER_TOKEN",
+        description=(
+            "If true, /v1/tasks/finish and /v1/tasks/still-going enforce "
+            "a per-user bearer token."
+        ),
+    )
 
     @property
     def is_local(self) -> bool:
@@ -80,6 +103,10 @@ class Settings(BaseSettings):
     @property
     def use_firestore(self) -> bool:
         return self.env is Environment.CLOUD and bool(self.gcp_project)
+
+    @property
+    def has_gemma(self) -> bool:
+        return bool(self.gemma_model) and self.use_vertex and bool(self.gcp_project)
 
 
 @lru_cache(maxsize=1)

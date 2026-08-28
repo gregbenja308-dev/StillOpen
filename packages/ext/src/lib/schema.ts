@@ -92,6 +92,9 @@ export const closeBatchSchema = z.object({
   closed_at: z.number(),
   rows: z.array(undoRowSchema),
   notes: z.string().default(""),
+  filing_url: z.string().nullable().optional().default(null),
+  audit_url: z.string().nullable().optional().default(null),
+  clerk: z.string().nullable().optional().default(null),
 });
 
 export type CloseBatch = z.infer<typeof closeBatchSchema>;
@@ -197,3 +200,61 @@ export const inferTasksResponseSchema = z.object({
 });
 
 export type OpenTask = z.infer<typeof openTaskSchema>;
+
+export const finishArtifactSchema = z.object({
+  record_id: z.string(),
+  kind: z.enum(["doc", "event", "task", "mail"]),
+  title: z.string().optional().default(""),
+  google_id: z.string(),
+  url: z.string(),
+});
+
+export const finishReportSchema = z.object({
+  artifacts_ok: z.boolean(),
+  apply_ok: z.boolean(),
+  missing: z.array(z.string()).default([]),
+  notes: z.string().default(""),
+});
+
+export const finishApplySchema = z.object({
+  close_tab_ids: z.array(z.number().int()).default([]),
+  keep_tab_ids: z.array(z.number().int()).default([]),
+});
+
+export const finishTaskResponseSchema = z.object({
+  plan: planSchema.passthrough(),
+  apply: finishApplySchema,
+  report: finishReportSchema,
+  artifacts: z.array(finishArtifactSchema).default([]),
+  clerk: z.string().default("heuristic"),
+  audit_url: z.string(),
+  filing_urls: z.array(z.string()).default([]),
+});
+
+export type FinishTaskResponse = z.infer<typeof finishTaskResponseSchema>;
+
+export const stillGoingResponseSchema = z.object({
+  enrolled: z.number().int(),
+  watch_ids: z.array(z.string()),
+});
+
+export type StillGoingResponse = z.infer<typeof stillGoingResponseSchema>;
+
+export const agentDescriptorSchema = z.object({
+  name: z.string(),
+  kind: z.string(),
+  tools: z.array(z.string()),
+  description: z.string(),
+  model: z.string().default(""),
+  rate_limits_per_minute: z.record(z.string(), z.number().int()).default({}),
+});
+
+export const registryResponseSchema = z.object({
+  graph: z.string(),
+  fast_model: z.string(),
+  reasoning_model: z.string(),
+  armor: z.string(),
+  agents: z.array(agentDescriptorSchema),
+});
+
+export type RegistryResponse = z.infer<typeof registryResponseSchema>;

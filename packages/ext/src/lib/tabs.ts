@@ -72,10 +72,17 @@ export function snapshotAllWindows(): Promise<TabSnapshot[]> {
   return snapshot({}, "replace");
 }
 
+export interface CloseExtras {
+  filingUrl?: string | null;
+  auditUrl?: string | null;
+  clerk?: string | null;
+}
+
 export async function applyClose(
   tabIds: number[],
   label = "Closed",
   notes = "",
+  extras: CloseExtras = {},
 ): Promise<{ closed: number; rows: UndoRow[]; batch: CloseBatch | null }> {
   const stored = await chrome.storage.session.get({ undoMap: [] as UndoRow[] });
   const undoMap = (stored.undoMap ?? []) as UndoRow[];
@@ -96,7 +103,7 @@ export async function applyClose(
     closingByUs.add(id);
   }
   await chrome.tabs.remove(toClose);
-  const batch = await recordBatch(label, rows, notes);
+  const batch = await recordBatch(label, rows, notes, extras);
   await chrome.storage.session.set({ lastClosed: rows });
   return { closed: toClose.length, rows, batch };
 }
@@ -111,7 +118,12 @@ async function loadBatches(): Promise<CloseBatch[]> {
     .map((row) => ({ ...row, notes: row.notes ?? "" }));
 }
 
-async function recordBatch(label: string, rows: UndoRow[], notes = ""): Promise<CloseBatch | null> {
+async function recordBatch(
+  label: string,
+  rows: UndoRow[],
+  notes = "",
+  extras: CloseExtras = {},
+): Promise<CloseBatch | null> {
   if (rows.length === 0) {
     return null;
   }
@@ -121,6 +133,9 @@ async function recordBatch(label: string, rows: UndoRow[], notes = ""): Promise<
     closed_at: Date.now(),
     rows,
     notes: notes.trim().slice(0, 4000),
+    filing_url: extras.filingUrl ?? null,
+    audit_url: extras.auditUrl ?? null,
+    clerk: extras.clerk ?? null,
   };
   const batches = [batch, ...(await loadBatches())];
   await chrome.storage.local.set({ closeBatches: batches });

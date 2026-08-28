@@ -46,6 +46,16 @@ Never `<all_urls>` at install. Page bodies are not read for the demo.
 
 User uncheck / Undo / skip teaches keep. Scheduled close only URLs the user selected. Watch stores **hashes**, never HTML.
 
+## Authenticated writes
+
+The `POST /v1/tasks/finish` and `POST /v1/tasks/still-going` endpoints — the two paths that mutate durable state on the user's behalf — accept an optional `X-Stillopen-User-Token` bearer header. The extension registers once at install (`POST /v1/auth/register`), the token is stored in `chrome.storage.local`, and the server keeps only its SHA-256 hash. Turn on `STILLOPEN_REQUIRE_USER_TOKEN=1` in production and a mismatch is a 401. The token is regenerated with 32 bytes of `secrets.token_hex`, so brute-forcing it is not feasible; comparison is constant-time (`secrets.compare_digest`) so timing side-channels are neutralised. See [`user_token.py`](packages/core/src/stillopen_core/security/user_token.py).
+
+Cloud Scheduler proves it's Cloud Scheduler with `X-Stillopen-Job-Token` from Secret Manager; the token is checked on every `/v1/jobs/watch` call in cloud.
+
+## Auditability
+
+Every plan has an append-only trail at `GET /v1/plans/{id}/audit` (Firestore in cloud, JSON on disk locally). Every Clerk-drafted filing has a permalink at `GET /v1/filings/{id}`. `GET /v1/agents/registry` returns the exact tools each agent is allowed to call and their rate limits, read from the loaded gateway policy — nothing to keep in sync by hand.
+
 ## Data we will not handle
 
 - No real personal window as a fixture or in git.

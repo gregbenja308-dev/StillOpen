@@ -1,4 +1,4 @@
-"""In-memory Memory Bank: plans, habits, watches, artifacts, tab sets."""
+"""In-memory Memory Bank: plans, habits, watches, artifacts, tab sets, events."""
 
 from __future__ import annotations
 
@@ -9,12 +9,14 @@ from typing import Any
 
 from stillopen_core.errors import NotFound
 from stillopen_core.schemas.artifact import ArtifactRecord
+from stillopen_core.schemas.event import PlanEvent
 from stillopen_core.schemas.habit import HabitProfile, ScheduledClose
 from stillopen_core.schemas.plan import Plan
 from stillopen_core.schemas.tab import TabSnapshot
 from stillopen_core.schemas.watch import Watch
 
 _BANK_PATH = Path(".stillopen/bank.json")
+_MAX_EVENTS_PER_PLAN = 200
 
 
 class MemoryBank:
@@ -26,6 +28,8 @@ class MemoryBank:
         self.tab_sets: dict[str, list[TabSnapshot]] = {}
         self.scheduled: dict[str, ScheduledClose] = {}
         self.tokens: dict[str, str] = {}
+        self.events: dict[str, list[PlanEvent]] = {}
+        self.filings: dict[str, dict[str, Any]] = {}
 
     def put_plan(self, plan: Plan) -> None:
         self.plans[plan.plan_id] = plan
@@ -100,6 +104,26 @@ class MemoryBank:
     def list_watches(self) -> list[Watch]:
         return list(self.watches.values())
 
+    def append_event(self, event: PlanEvent) -> None:
+        rows = self.events.setdefault(event.plan_id, [])
+        rows.append(event)
+        if len(rows) > _MAX_EVENTS_PER_PLAN:
+            del rows[: len(rows) - _MAX_EVENTS_PER_PLAN]
+        persist(self)
+
+    def list_events(self, plan_id: str) -> list[PlanEvent]:
+        return list(self.events.get(plan_id, ()))
+
+    def put_filing(self, filing_id: str, payload: dict[str, Any]) -> None:
+        self.filings[filing_id] = payload
+        persist(self)
+
+    def get_filing(self, filing_id: str) -> dict[str, Any]:
+        row = self.filings.get(filing_id)
+        if row is None:
+            raise NotFound("filings", filing_id)
+        return row
+
 
 def _should_persist() -> bool:
     return os.environ.get("PYTEST_CURRENT_TEST") is None
@@ -124,6 +148,8 @@ def bank_storage() -> dict[str, Any]:
             "tab_sets",
             "scheduled",
             "tokens",
+            "events",
+            "filings",
         ],
         "habit_fields": [
             "rules",
@@ -158,6 +184,11 @@ def persist(bank: MemoryBank) -> None:
         },
         "scheduled": [s.model_dump(mode="json") for s in bank.scheduled.values()],
         "tokens": dict(bank.tokens),
+        "events": {
+            pid: [e.model_dump(mode="json") for e in rows]
+            for pid, rows in bank.events.items()
+        },
+        "filings": dict(bank.filings),
     }
     _BANK_PATH.write_text(json.dumps(payload, default=str), encoding="utf-8")
 
@@ -187,6 +218,11 @@ def load_bank() -> MemoryBank:
     for user_id, blob in (raw.get("tokens") or {}).items():
         if isinstance(blob, str):
             bank.tokens[user_id] = blob
+    for pid, rows in (raw.get("events") or {}).items():
+        bank.events[pid] = [PlanEvent.model_validate(e, strict=False) for e in rows]
+    for filing_id, payload in (raw.get("filings") or {}).items():
+        if isinstance(payload, dict):
+            bank.filings[filing_id] = payload
     return bank
 
 

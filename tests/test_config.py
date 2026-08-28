@@ -20,8 +20,16 @@ def test_has_gemini_via_vertex(monkeypatch) -> None:
     assert settings.gcp_location == "global"
 
 
-def test_get_google_is_always_fake() -> None:
+def test_get_google_defaults_to_filing_store() -> None:
+    from stillopen_core.google.factory import get_google
+    from stillopen_core.google.filings import FilingStore
+
+    assert isinstance(get_google("local-dev"), FilingStore)
+
+
+def test_get_google_falls_back_to_fake_on_flag(monkeypatch) -> None:
     from stillopen_core.google.factory import get_google
     from stillopen_core.google.workspace import FakeGoogle
 
+    monkeypatch.setenv("STILLOPEN_USE_FAKE_GOOGLE", "1")
     assert isinstance(get_google("local-dev"), FakeGoogle)

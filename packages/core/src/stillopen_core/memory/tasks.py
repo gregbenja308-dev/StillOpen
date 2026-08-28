@@ -630,7 +630,12 @@ def _is_generic_work_label(label: str) -> bool:
 
 
 def _goal_label(members: list[SanitizedTab]) -> str:
-    """A todo the user could mark done — never the page title or site name."""
+    """A todo the user could mark done — never the page title or site name.
+
+    When the heuristic falls all the way back to a generic label, ask
+    Gemma (a second Google model, if configured) for a one-liner. Gemma
+    is bounded: it never sees URLs, extracts, or the user's notes.
+    """
     raw = (
         _shared_path_topic(members)
         or _shared_name(members)
@@ -641,9 +646,9 @@ def _goal_label(members: list[SanitizedTab]) -> str:
     if all(t.host_class is HostClass.NEWS for t in members):
         return "Reading today's news"
     if any(t.host_class is HostClass.LISTING for t in members):
-        return f"Compare {topic} options" if topic else "Compare these options"
+        return f"Compare {topic} options" if topic else _gemma_or("Compare these options", members)
     if _looks_like_lookup(members) or any(t.host_class is HostClass.SEARCH for t in members):
-        return f"Look up {topic}" if topic else "Look this up"
+        return f"Look up {topic}" if topic else _gemma_or("Look this up", members)
     if topic:
         intention = _guess_intention(members)
         if intention is Intention.WAITING:
@@ -652,7 +657,21 @@ def _goal_label(members: list[SanitizedTab]) -> str:
             return f"Compare {topic} options"
         return f"Read {topic}"
     fallback = _short(members[0].title, members[0].host) if members else ""
-    return fallback if fallback and not _label_has_noise(fallback) else "Unfinished task"
+    if fallback and not _label_has_noise(fallback):
+        return fallback
+    return _gemma_or("Unfinished task", members)
+
+
+def _gemma_or(fallback: str, members: list[SanitizedTab]) -> str:
+    from stillopen_core.gateway.gemma import is_available, suggest_task_label
+
+    if not is_available() or not members:
+        return fallback
+    return suggest_task_label(
+        hosts=[m.host for m in members],
+        titles=[m.title for m in members],
+        fallback=fallback,
+    )
 
 
 def _shared_name(members: list[SanitizedTab]) -> str:

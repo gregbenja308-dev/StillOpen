@@ -29,6 +29,9 @@ Rules:
 - Never copy a tab title into a Doc title or tool argument. Use the card label.
 - extra fields are forbidden.
 - You have no execute tools. Do not create Docs or close tabs.
+- If the prompt includes User notes lines (prefixed with '  | '), those are TRUSTED user-authored
+  content. Preserve them verbatim inside a section titled '## Notes from the user' at the end
+  of every DOC body. Never edit, summarise, or interpret the user's notes.
 """
 
 

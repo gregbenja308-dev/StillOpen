@@ -10,7 +10,18 @@ from stillopen_core.observability.logger import get_logger
 from stillopen_core.observability.tracing import setup_tracing
 from stillopen_core.security.secrets import hydrate_secrets
 
-from stillopen_api.routes import health, jobs, memory, plans, tasks
+from stillopen_api.routes import (
+    agents,
+    audit,
+    auth,
+    filings,
+    finish,
+    health,
+    jobs,
+    memory,
+    plans,
+    tasks,
+)
 
 _logger = get_logger(__name__)
 
@@ -35,13 +46,22 @@ def create_app() -> FastAPI:
         allow_origin_regex=settings.cors_origin_regex,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "X-Stillopen-Job-Token"],
+        allow_headers=[
+            "Content-Type",
+            "X-Stillopen-Job-Token",
+            "X-Stillopen-User-Token",
+        ],
     )
     app.include_router(health.router)
     app.include_router(plans.router)
     app.include_router(memory.router)
     app.include_router(jobs.router)
     app.include_router(tasks.router)
+    app.include_router(finish.router)
+    app.include_router(audit.router)
+    app.include_router(agents.router)
+    app.include_router(filings.router)
+    app.include_router(auth.router)
     _logger.info(
         "api.ready",
         env=settings.env.value,

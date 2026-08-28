@@ -110,7 +110,7 @@ export function attachLocal(tasks: OpenTask[], tab: TabSnapshot): OpenTask[] | n
     return null;
   }
   const task = tasks[bestI];
-  if (task.tab_ids.includes(tab.tab_id)) {
+  if (!task || task.tab_ids.includes(tab.tab_id)) {
     return tasks;
   }
   const copy = [...tasks];

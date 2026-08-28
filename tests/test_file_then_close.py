@@ -46,7 +46,8 @@ def test_file_then_close_returns_artifact_url(seeded_tabs: list[TabSnapshot]) ->
     result = run_plan(plan, sanitize_tabs(house))
     assert result.report.artifacts_ok
     assert result.records
-    assert result.records[0].url.startswith("https://example.invalid/")
+    # FilingStore returns a URL under the API's public base + /v1/filings/.
+    assert "/v1/filings/" in result.records[0].url
     assert result.apply.close_tab_ids
 
 

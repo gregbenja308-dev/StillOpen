@@ -15,10 +15,12 @@ from stillopen_core.errors import ConfigError, GatewayError, InvalidAgentOutput
 from stillopen_core.gateway.router import AgentGateway, get_gateway
 from stillopen_core.google.factory import get_google
 from stillopen_core.google.workspace import GoogleWorkspace
+from stillopen_core.observability.audit import record_event
 from stillopen_core.observability.logger import get_logger
 from stillopen_core.observability.tracing import current_trace_id, start_span
 from stillopen_core.schemas.agent import ClerkOutput, TabApply, VerifyReport
 from stillopen_core.schemas.artifact import ArtifactRecord
+from stillopen_core.schemas.event import EventPhase, Verdict
 from stillopen_core.schemas.plan import Plan, PlanStatus
 from stillopen_core.schemas.tab import SanitizedTab
 from stillopen_core.watch.enroll import enroll_from_plan
@@ -95,6 +97,15 @@ def _run_plan_inner(
             clerk_name = "injected"
     except (InvalidAgentOutput, GatewayError):
         _logger.info("conductor.clerk_retry", plan_id=plan.plan_id)
+        record_event(
+            plan_id=plan.plan_id,
+            user_id=plan.user_id,
+            agent="clerk",
+            phase=EventPhase.CLERK_DEGRADE,
+            verdict=Verdict.DEGRADED,
+            tool="draft_artifact",
+            summary="clerk raised, retrying with heuristic",
+        )
         try:
             drafts = draft_or_degrade(
                 plan, tabs, raw_json=clerk_retry_raw, allow_adk=False, gateway=gateway
@@ -109,7 +120,25 @@ def _run_plan_inner(
                 missing=["clerk"],
                 notes=str(exc),
             )
+            record_event(
+                plan_id=plan.plan_id,
+                user_id=plan.user_id,
+                agent="clerk",
+                phase=EventPhase.CLERK_DEGRADE,
+                verdict=Verdict.BLOCKED,
+                summary=str(exc)[:200],
+            )
             return RunResult(plan=plan, drafts=None, records=[], apply=empty, report=report)
+
+    record_event(
+        plan_id=plan.plan_id,
+        user_id=plan.user_id,
+        agent="clerk",
+        phase=EventPhase.CLERK_DRAFT,
+        verdict=Verdict.OK,
+        tool="draft_artifact",
+        summary=f"impl={clerk_name} drafts={len(drafts.drafts)}",
+    )
 
     try:
         records, apply = execute(plan, drafts, tabs, google, gateway=gateway)
@@ -122,15 +151,53 @@ def _run_plan_inner(
             missing=["runner"],
             notes=str(exc),
         )
+        record_event(
+            plan_id=plan.plan_id,
+            user_id=plan.user_id,
+            agent="runner",
+            phase=EventPhase.RUNNER_FAIL,
+            verdict=Verdict.BLOCKED,
+            summary=str(exc)[:200],
+        )
         return RunResult(
             plan=plan, drafts=drafts, records=[], apply=empty, report=report, clerk=clerk_name
         )
+    record_event(
+        plan_id=plan.plan_id,
+        user_id=plan.user_id,
+        agent="runner",
+        phase=EventPhase.RUNNER_FILE,
+        verdict=Verdict.OK,
+        tool="create_doc|create_event",
+        summary=f"artifacts={len(records)} to_close={len(apply.close_tab_ids)}",
+    )
 
-    report = verify(records, apply, google, plan, gateway=gateway)
+    report = verify(records, apply, google, plan, gateway=gateway, tabs=tabs)
     apply = safe_apply(apply, report)
     plan.status = PlanStatus.VERIFIED if report.artifacts_ok else PlanStatus.DEGRADED
     if report.artifacts_ok:
         enroll_from_plan(plan, tabs)
+    record_event(
+        plan_id=plan.plan_id,
+        user_id=plan.user_id,
+        agent="verifier",
+        phase=EventPhase.VERIFIER_OK if report.artifacts_ok else EventPhase.VERIFIER_MISSING,
+        verdict=Verdict.OK if report.artifacts_ok else Verdict.BLOCKED,
+        tool="get_doc|get_event",
+        summary=(
+            f"missing={len(report.missing)} close={len(apply.close_tab_ids)} "
+            f"apply_ok={report.apply_ok}"
+        ),
+    )
+    if not report.artifacts_ok:
+        record_event(
+            plan_id=plan.plan_id,
+            user_id=plan.user_id,
+            agent="verifier",
+            phase=EventPhase.CLOSE_BLOCKED,
+            verdict=Verdict.BLOCKED,
+            summary="artifacts missing; refusing to close",
+        )
     _logger.info(
         "conductor.run",
         plan_id=plan.plan_id,

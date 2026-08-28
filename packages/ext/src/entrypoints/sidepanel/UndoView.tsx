@@ -138,6 +138,22 @@ export function UndoView({
                 </li>
               ))}
             </ul>
+            {batch.filing_url || batch.audit_url ? (
+              <p className="agent-links">
+                {batch.filing_url ? (
+                  <a href={batch.filing_url} target="_blank" rel="noopener noreferrer">
+                    Filing
+                  </a>
+                ) : null}
+                {batch.filing_url && batch.audit_url ? " · " : null}
+                {batch.audit_url ? (
+                  <a href={batch.audit_url} target="_blank" rel="noopener noreferrer">
+                    Audit trail
+                  </a>
+                ) : null}
+                {batch.clerk ? <span className="host"> · clerk: {batch.clerk}</span> : null}
+              </p>
+            ) : null}
             <ClosedNote batchId={batch.batch_id} notes={batch.notes ?? ""} onSave={onNotes} />
           </section>
         ))

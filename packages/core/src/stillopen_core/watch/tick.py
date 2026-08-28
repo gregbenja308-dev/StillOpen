@@ -9,10 +9,12 @@ from hashlib import sha256
 from stillopen_core.google.factory import get_google
 from stillopen_core.google.workspace import GoogleWorkspace
 from stillopen_core.memory.fakes import get_bank
+from stillopen_core.observability.audit import record_event
 from stillopen_core.observability.logger import get_logger
 from stillopen_core.observability.tracing import start_span
 from stillopen_core.schemas.artifact import ArtifactKind, ArtifactRecord
 from stillopen_core.schemas.base import now_utc
+from stillopen_core.schemas.event import EventPhase, Verdict
 from stillopen_core.schemas.watch import Watch, WatchKind, WatchStatus
 
 _logger = get_logger(__name__)
@@ -81,6 +83,15 @@ def _tick(
             acted.append(watch)
         watch.touch()
         bank.put_watch(watch)
+        record_event(
+            plan_id=watch.plan_id,
+            user_id=watch.user_id,
+            agent="watch",
+            phase=EventPhase.WATCH_TICK,
+            verdict=Verdict.OK if watch.status is WatchStatus.ACTIVE else Verdict.INFO,
+            tool="hash_only_fetch",
+            summary=f"status={watch.status.value} action={watch.last_action or 'none'}",
+        )
         _logger.info("watch.tick", watch_id=watch.watch_id, status=watch.status.value)
     return acted
 

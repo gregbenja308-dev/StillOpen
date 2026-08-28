@@ -8,6 +8,7 @@ from stillopen_core.config import get_settings
 from stillopen_core.errors import NotFound
 from stillopen_core.observability.logger import get_logger
 from stillopen_core.schemas.artifact import ArtifactRecord
+from stillopen_core.schemas.event import PlanEvent
 from stillopen_core.schemas.habit import HabitProfile, ScheduledClose
 from stillopen_core.schemas.plan import Plan
 from stillopen_core.schemas.tab import TabSnapshot
@@ -35,6 +36,8 @@ class FirestoreBank:
         self.tab_sets: dict[str, list[TabSnapshot]] = {}
         self.scheduled: dict[str, ScheduledClose] = {}
         self.tokens: dict[str, str] = {}
+        self.events: dict[str, list[PlanEvent]] = {}
+        self.filings: dict[str, dict[str, Any]] = {}
 
     def _col(self, name: str) -> Any:
         return self._db.collection(name)
@@ -153,6 +156,39 @@ class FirestoreBank:
         blob = (snap.to_dict() or {}).get("blob")
         return blob if isinstance(blob, str) else None
 
+    def append_event(self, event: PlanEvent) -> None:
+        rows = self.events.setdefault(event.plan_id, [])
+        rows.append(event)
+        self._write(
+            f"plans/{event.plan_id}/events",
+            event.event_id,
+            event.model_dump(mode="json"),
+        )
+
+    def list_events(self, plan_id: str) -> list[PlanEvent]:
+        if plan_id in self.events:
+            return list(self.events[plan_id])
+        rows: list[PlanEvent] = []
+        for snap in self._col(f"plans/{plan_id}/events").stream():
+            rows.append(PlanEvent.model_validate(snap.to_dict(), strict=False))
+        rows.sort(key=lambda e: e.created_at)
+        self.events[plan_id] = rows
+        return list(rows)
+
+    def put_filing(self, filing_id: str, payload: dict[str, Any]) -> None:
+        self.filings[filing_id] = payload
+        self._write("filings", filing_id, payload)
+
+    def get_filing(self, filing_id: str) -> dict[str, Any]:
+        if filing_id in self.filings:
+            return self.filings[filing_id]
+        snap = self._col("filings").document(filing_id).get()
+        if not snap.exists:
+            raise NotFound("filings", filing_id)
+        payload = snap.to_dict() or {}
+        self.filings[filing_id] = payload
+        return payload
+
 
 def firestore_storage() -> dict[str, Any]:
     settings = get_settings()
@@ -162,12 +198,14 @@ def firestore_storage() -> dict[str, Any]:
         "path": f"projects/{settings.gcp_project}/databases/{settings.firestore_database}",
         "collections": [
             "plans",
+            "plans/{plan_id}/events",
             "habits",
             "watches",
             "artifacts",
             "tab_sets",
             "scheduled",
             "tokens",
+            "filings",
         ],
         "habit_fields": [
             "rules",

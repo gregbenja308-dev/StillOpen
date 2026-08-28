@@ -17,6 +17,7 @@ def draft_artifacts(
     if raw_json is not None:
         out = parse_output("clerk", raw_json, ClerkOutput)
         _require_citations(out)
+        out = ensure_user_notes(out, plan)
         return rewrite_copied_titles(out, tabs, plan)
     drafts: list[ArtifactDraft] = []
     by_id = {t.tab_id: t for t in tabs}
@@ -27,22 +28,23 @@ def draft_artifacts(
                 ArtifactDraft(
                     kind=ArtifactKind.DOC,
                     title=f"Decide: {card.label}",
-                    body=_table(tabs, card.tab_ids),
+                    body=_body(_table(tabs, card.tab_ids), plan.user_notes),
                     source_urls=urls,
                     card_id=card.card_id,
                 )
             )
         elif card.verb is Verb.FILE:
             urls = [by_id[i].url for i in card.tab_ids if i in by_id]
+            body = "\n".join(
+                f"- {by_id[i].title}: {by_id[i].url}"
+                for i in card.tab_ids
+                if i in by_id
+            )
             drafts.append(
                 ArtifactDraft(
                     kind=ArtifactKind.DOC,
                     title=f"Filed: {card.label}",
-                    body="\n".join(
-                        f"- {by_id[i].title}: {by_id[i].url}"
-                        for i in card.tab_ids
-                        if i in by_id
-                    ),
+                    body=_body(body, plan.user_notes),
                     source_urls=urls,
                     card_id=card.card_id,
                 )
@@ -53,14 +55,39 @@ def draft_artifacts(
                 ArtifactDraft(
                     kind=ArtifactKind.EVENT,
                     title=f"Watch: {card.label}",
-                    body="Check tracking page.",
+                    body=_body("Check tracking page.", plan.user_notes),
                     source_urls=urls,
                     card_id=card.card_id,
                 )
             )
     out = ClerkOutput(drafts=drafts)
     _require_citations(out)
+    out = ensure_user_notes(out, plan)
     return rewrite_copied_titles(out, tabs, plan)
+
+
+def ensure_user_notes(out: ClerkOutput, plan: Plan) -> ClerkOutput:
+    """Guarantee the user's own notes survive whatever the LLM drafted.
+
+    Clerk instructions ask the model to preserve ``user_notes`` verbatim,
+    but we do not trust that. Append them under a fixed heading so the
+    File output always contains the user's words. Not injection-safe by
+    itself — the note is *user-authored*, treated as trusted content.
+    """
+
+    notes = (plan.user_notes or "").strip()
+    if not notes:
+        return out
+    marker = "## Notes from the user"
+    for draft in out.drafts:
+        if draft.kind is not ArtifactKind.DOC:
+            continue
+        if marker in draft.body:
+            continue
+        suffix = f"\n\n{marker}\n{notes}"
+        # Runner will store body_preview[:200]; keep the body from ballooning.
+        draft.body = (draft.body + suffix)[:8000]
+    return out
 
 
 def rewrite_copied_titles(
@@ -99,4 +126,11 @@ def _table(tabs: list[SanitizedTab], tab_ids: list[int]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["draft_artifacts", "rewrite_copied_titles"]
+def _body(base: str, user_notes: str) -> str:
+    notes = (user_notes or "").strip()
+    if not notes:
+        return base
+    return f"{base}\n\n## Notes from the user\n{notes}"
+
+
+__all__ = ["draft_artifacts", "ensure_user_notes", "rewrite_copied_titles"]

@@ -53,6 +53,8 @@ class Plan(TimestampedModel):
     cards: list[PlanCard] = Field(default_factory=list)
     blocked_tab_ids: list[int] = Field(default_factory=list)
     trace_id: str | None = None
+    user_notes: str = Field(default="", max_length=4000)
+    source_task_id: str | None = None
 
 
 __all__ = ["Plan", "PlanCard", "PlanStatus", "TabAction", "Verb"]

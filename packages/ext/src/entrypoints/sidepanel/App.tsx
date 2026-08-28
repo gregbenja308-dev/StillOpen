@@ -16,7 +16,7 @@ import {
   saveBoard,
   type Board,
 } from "@/lib/board";
-import { getMemory, inferTasks, observeMemory } from "@/lib/api";
+import { finishTask, getMemory, inferTasks, observeMemory, stillGoing } from "@/lib/api";
 import { loadFiledNotes, saveFiledNote } from "@/lib/notes";
 import type {
   CloseReply,
@@ -235,8 +235,17 @@ export function App() {
     tabIds: number[],
     label: string,
     notes = "",
+    extras: { filingUrl?: string | null; auditUrl?: string | null; clerk?: string | null } = {},
   ): Promise<{ closed: number; batchId: string | null }> {
-    const reply = await send<CloseReply>({ type: "APPLY_CLOSE", tabIds, label, notes });
+    const reply = await send<CloseReply>({
+      type: "APPLY_CLOSE",
+      tabIds,
+      label,
+      notes,
+      filingUrl: extras.filingUrl ?? null,
+      auditUrl: extras.auditUrl ?? null,
+      clerk: extras.clerk ?? null,
+    });
     if (!reply.ok) {
       throw new Error(reply.error);
     }
@@ -256,8 +265,36 @@ export function App() {
       if (tabs.length === 0) {
         throw new Error("Those tabs are gone.");
       }
-      await closeTabs(latest.tab_ids, latest.label, note);
-      setSnapshots((live) => live.filter((tab) => !latest.tab_ids.includes(tab.tab_id)));
+
+      let filingUrl: string | null = null;
+      let auditUrl: string | null = null;
+      let clerk: string | null = null;
+      let closeIds: number[] = latest.tab_ids;
+
+      try {
+        const finish = await finishTask({ task: latest, tabs });
+        auditUrl = finish.audit_url;
+        clerk = finish.clerk || null;
+        filingUrl = finish.filing_urls[0] ?? null;
+        if (finish.report.artifacts_ok) {
+          closeIds = finish.apply.close_tab_ids.length
+            ? finish.apply.close_tab_ids
+            : latest.tab_ids;
+        } else {
+          setNotice(
+            `Kept tabs open — Verifier said the filing wasn't complete: ${finish.report.notes || "missing artifacts"}.`,
+          );
+          throw new Error("verifier_veto");
+        }
+      } catch (agentError) {
+        if ((agentError as Error).message === "verifier_veto") {
+          throw agentError;
+        }
+        setNotice(`Filing skipped (${(agentError as Error).message}); closing locally.`);
+      }
+
+      await closeTabs(closeIds, latest.label, note, { filingUrl, auditUrl, clerk });
+      setSnapshots((live) => live.filter((tab) => !closeIds.includes(tab.tab_id)));
       setFarewell(latest);
       await dismissTask(latest.task_id);
       if (note) {
@@ -269,16 +306,39 @@ export function App() {
         title: latest.label,
         source: "task",
       });
-      setNotice(note ? `Closed “${latest.label}”. Note saved.` : `Closed “${latest.label}”.`);
+      const suffix = filingUrl ? " Filed to Google." : "";
+      setNotice(note ? `Closed “${latest.label}”. Note saved.${suffix}` : `Closed “${latest.label}”.${suffix}`);
     } catch (error) {
       window.clearTimeout(celebrateTimer.current);
       celebratingRef.current = null;
       closingRef.current = null;
       setCelebratingId(null);
       setFarewell(null);
-      setNotice(String(error));
+      if ((error as Error).message !== "verifier_veto") {
+        setNotice(String(error));
+      }
     } finally {
       setClosingId(null);
+    }
+  }
+
+  async function onStillGoing(task: OpenTask) {
+    try {
+      const urls = snapshots
+        .filter((tab) => task.tab_ids.includes(tab.tab_id))
+        .map((tab) => tab.url);
+      if (urls.length === 0) {
+        setNotice("No tabs to track for this task.");
+        return;
+      }
+      const reply = await stillGoing({ task, urls });
+      setNotice(
+        reply.enrolled === 0
+          ? "Already tracking these tabs."
+          : `Watching ${reply.enrolled} tab${reply.enrolled === 1 ? "" : "s"} — I'll ping when they change.`,
+      );
+    } catch (error) {
+      setNotice(String(error));
     }
   }
 
@@ -443,6 +503,7 @@ export function App() {
             onDemo={() => void onDemo()}
             onNewTask={() => void commit({ ...board, tasks: [newTask(), ...board.tasks] })}
             onDone={(task) => void onDone(task)}
+            onStillGoing={(task) => void onStillGoing(task)}
             onRename={(taskId, label) => {
               void commit({
                 ...board,

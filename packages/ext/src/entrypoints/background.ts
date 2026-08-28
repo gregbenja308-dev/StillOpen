@@ -87,6 +87,9 @@ export default defineBackground(() => {
         label?: string;
         batchId?: string;
         notes?: string;
+        filingUrl?: string | null;
+        auditUrl?: string | null;
+        clerk?: string | null;
       },
       _sender,
       sendResponse,
@@ -113,6 +116,11 @@ export default defineBackground(() => {
         message.tabIds ?? [],
         typeof message.label === "string" ? message.label : "Closed",
         typeof message.notes === "string" ? message.notes : "",
+        {
+          filingUrl: typeof message.filingUrl === "string" ? message.filingUrl : null,
+          auditUrl: typeof message.auditUrl === "string" ? message.auditUrl : null,
+          clerk: typeof message.clerk === "string" ? message.clerk : null,
+        },
       )
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));

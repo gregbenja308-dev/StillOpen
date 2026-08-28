@@ -928,3 +928,20 @@ button.linkish {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+.agent-links {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted, #6b6b6b);
+}
+
+.agent-links a {
+  color: #1f4b3a;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(31, 75, 58, 0.35);
+}
+
+.agent-links a:hover {
+  border-bottom-color: #1f4b3a;
+}

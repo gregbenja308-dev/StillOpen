@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from stillopen_core.memory.fakes import get_bank
+from stillopen_core.observability.audit import record_event
+from stillopen_core.schemas.event import EventPhase
 from stillopen_core.schemas.plan import Plan, Verb
 from stillopen_core.schemas.tab import SanitizedTab
 from stillopen_core.schemas.watch import Watch, WatchKind, default_deadline
@@ -41,7 +43,51 @@ def enroll_from_plan(plan: Plan, tabs: list[SanitizedTab]) -> list[Watch]:
             )
             bank.put_watch(watch)
             enrolled.append(watch)
+    if enrolled:
+        record_event(
+            plan_id=plan.plan_id,
+            user_id=plan.user_id,
+            agent="watch",
+            phase=EventPhase.WATCH_ENROLLED,
+            tool="put_watch",
+            summary=f"enrolled={len(enrolled)}",
+        )
     return enrolled
 
 
-__all__ = ["enroll_from_plan"]
+def enroll_from_task(
+    *,
+    user_id: str,
+    label: str,
+    urls: list[str],
+    kind: WatchKind = WatchKind.TRACKING,
+    plan_id: str = "",
+) -> list[Watch]:
+    """Enroll one Watch per URL for a "Still going" task. No plan required."""
+    bank = get_bank()
+    enrolled: list[Watch] = []
+    for raw in urls:
+        redacted, _ = redact_url(raw)
+        watch = Watch(
+            user_id=user_id,
+            plan_id=plan_id or "task",
+            kind=kind,
+            label=label,
+            url=redacted,
+            deadline_at=default_deadline(kind),
+        )
+        bank.put_watch(watch)
+        enrolled.append(watch)
+    if enrolled and plan_id:
+        record_event(
+            plan_id=plan_id,
+            user_id=user_id,
+            agent="watch",
+            phase=EventPhase.WATCH_ENROLLED,
+            tool="put_watch",
+            summary=f"from_task label={label[:40]} enrolled={len(enrolled)}",
+        )
+    return enrolled
+
+
+__all__ = ["enroll_from_plan", "enroll_from_task"]
