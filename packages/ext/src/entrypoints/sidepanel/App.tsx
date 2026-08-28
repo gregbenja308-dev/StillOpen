@@ -16,7 +16,7 @@ import {
   saveBoard,
   type Board,
 } from "@/lib/board";
-import { finishTask, getMemory, inferTasks, observeMemory, stillGoing } from "@/lib/api";
+import { finishTask, getMemory, inferTasks, observeMemory } from "@/lib/api";
 import { loadFiledNotes, saveFiledNote } from "@/lib/notes";
 import type {
   CloseReply,
@@ -322,26 +322,6 @@ export function App() {
     }
   }
 
-  async function onStillGoing(task: OpenTask) {
-    try {
-      const urls = snapshots
-        .filter((tab) => task.tab_ids.includes(tab.tab_id))
-        .map((tab) => tab.url);
-      if (urls.length === 0) {
-        setNotice("No tabs to track for this task.");
-        return;
-      }
-      const reply = await stillGoing({ task, urls });
-      setNotice(
-        reply.enrolled === 0
-          ? "Already tracking these tabs."
-          : `Watching ${reply.enrolled} tab${reply.enrolled === 1 ? "" : "s"} — I'll ping when they change.`,
-      );
-    } catch (error) {
-      setNotice(String(error));
-    }
-  }
-
   async function onChatClose(tabIds: number[], label: string) {
     setBusy(true);
     const hit = board.tasks.find((task) => tabIds.some((id) => task.tab_ids.includes(id)));
@@ -503,7 +483,6 @@ export function App() {
             onDemo={() => void onDemo()}
             onNewTask={() => void commit({ ...board, tasks: [newTask(), ...board.tasks] })}
             onDone={(task) => void onDone(task)}
-            onStillGoing={(task) => void onStillGoing(task)}
             onRename={(taskId, label) => {
               void commit({
                 ...board,
