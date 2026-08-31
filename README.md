@@ -26,7 +26,7 @@ Then:
 2. **Load unpacked** → select `packages/ext/dist/chrome-mv3`
 3. Pin the extension, open the side panel
 
-The extension is already pointed at the hosted Cloud Run API above. **Closes are real** — use the **Demo Seed** button in a new window (20 example tabs: Austin listings, UPS tracking, a dictionary lookup, Chase banking). Do not close your personal tabs.
+The extension is already pointed at the hosted Cloud Run API above. **Closes are real** — use the **Demo Seed** button in a new window (20 example tabs: Austin listings, UPS tracking, a dictionary lookup, Chase banking).
 
 To point at a local API instead (e.g. after `make api`), in the extension service-worker devtools console:
 
