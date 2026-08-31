@@ -58,7 +58,12 @@ export function pruneBoard(board: Board, live: TabSnapshot[]): Board {
           seen.add(tab.tab_id);
         }
       }
-      if (members.length === 0 && !task.user_locked) {
+      if (members.length === 0) {
+        const blankDraft =
+          task.user_locked && task.tab_ids.length === 0 && !(task.urls?.length);
+        if (blankDraft) {
+          return task;
+        }
         return null;
       }
       return withMembers(task, members);

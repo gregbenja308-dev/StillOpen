@@ -77,6 +77,7 @@ export function App() {
   const [farewell, setFarewell] = useState<OpenTask | null>(null);
   const celebratingRef = useRef<string | null>(null);
   const closingRef = useRef<string | null>(null);
+  const dismissedRef = useRef(new Set<string>());
   celebratingRef.current = celebratingId;
   closingRef.current = closingId;
 
@@ -157,6 +158,7 @@ export function App() {
   }
 
   async function dismissTask(taskId: string) {
+    dismissedRef.current.add(taskId);
     const current = boardRef.current;
     if (!current.tasks.some((task) => task.task_id === taskId)) {
       return;
@@ -176,7 +178,15 @@ export function App() {
       return;
     }
     setSnapshots(reply.tabs);
-    await commit(pruneBoard(boardRef.current, reply.tabs));
+    await commit(
+      pruneBoard(
+        {
+          ...boardRef.current,
+          tasks: boardRef.current.tasks.filter((task) => !dismissedRef.current.has(task.task_id)),
+        },
+        reply.tabs,
+      ),
+    );
   }
 
   async function scan(full: boolean) {
@@ -191,7 +201,13 @@ export function App() {
       }
       setSnapshots(reply.tabs);
       const saved = full && boardRef.current.tasks.length === 0 ? await loadBoard() : boardRef.current;
-      const pruned = pruneBoard(saved, reply.tabs);
+      const pruned = pruneBoard(
+        {
+          ...saved,
+          tasks: saved.tasks.filter((task) => !dismissedRef.current.has(task.task_id)),
+        },
+        reply.tabs,
+      );
       const dump = memory ?? (await loadMemory());
       const cutoff = dump?.profile.stale_cutoff_days ?? 7;
       if (reply.tabs.length === 0) {
@@ -217,6 +233,7 @@ export function App() {
   }
 
   function celebrate(taskId: string) {
+    celebratingRef.current = taskId;
     setCelebratingId(taskId);
     window.clearTimeout(celebrateTimer.current);
     celebrateTimer.current = window.setTimeout(() => {
@@ -257,7 +274,6 @@ export function App() {
 
   async function onDone(task: OpenTask) {
     setClosingId(task.task_id);
-    celebrate(task.task_id);
     try {
       const latest = boardRef.current.tasks.find((row) => row.task_id === task.task_id) ?? task;
       const note = (latest.notes ?? task.notes ?? "").trim();
@@ -297,6 +313,7 @@ export function App() {
       setSnapshots((live) => live.filter((tab) => !closeIds.includes(tab.tab_id)));
       setFarewell(latest);
       await dismissTask(latest.task_id);
+      celebrate(latest.task_id);
       if (note) {
         await saveFiledNote({ ...latest, notes: note });
       }
@@ -325,7 +342,6 @@ export function App() {
   async function onChatClose(tabIds: number[], label: string) {
     setBusy(true);
     const hit = board.tasks.find((task) => tabIds.some((id) => task.tab_ids.includes(id)));
-    celebrate(hit?.task_id ?? "chat");
     try {
       await closeTabs(tabIds, label || "Ask");
       if (hit) {
@@ -333,6 +349,7 @@ export function App() {
         setFarewell(hit);
         await dismissTask(hit.task_id);
       }
+      celebrate(hit?.task_id ?? "chat");
     } catch (error) {
       window.clearTimeout(celebrateTimer.current);
       celebratingRef.current = null;
@@ -399,7 +416,9 @@ export function App() {
 
   const loose = looseTabs(snapshots, board);
   const shownTasks =
-    farewell && !board.tasks.some((task) => task.task_id === farewell.task_id)
+    farewell &&
+    celebratingId === farewell.task_id &&
+    !board.tasks.some((task) => task.task_id === farewell.task_id)
       ? [farewell, ...board.tasks]
       : board.tasks;
 
